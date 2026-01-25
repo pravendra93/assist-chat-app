@@ -7,6 +7,9 @@ app = FastAPI(
 )
 
 app.include_router(chat_router, prefix="/v1/chat")
+@app.get("/")
+async def root():
+    return {"status": "ok", "message": "Welcome to RAG Chat Service"}
 
 @app.get("/health")
 async def health():
