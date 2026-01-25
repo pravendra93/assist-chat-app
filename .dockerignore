@@ -1,0 +1,34 @@
+
+# Git
+.git
+.gitignore
+
+# Python
+__pycache__
+*.pyc
+*.pyo
+*.pyd
+.Python
+env
+venv
+.env
+.venv
+pip-log.txt
+pip-delete-this-directory.txt
+
+# Docker
+docker-compose.yml
+Dockerfile
+.dockerignore
+
+# IDEs
+.idea
+.vscode
+.DS_Store
+
+# Testing
+tests/
+pytest.ini
+.pytest_cache
+.coverage
+htmlcov/

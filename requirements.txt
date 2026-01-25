@@ -1,0 +1,16 @@
+fastapi==0.110.0
+uvicorn[standard]==0.29.0
+gunicorn==21.2.0
+httpx==0.27.0
+anyio>=4.0.0
+python-dotenv==1.0.1
+python-multipart==0.0.9
+loguru==0.7.2
+tenacity==8.2.3
+
+pydantic
+pydantic-settings
+langfuse
+opentelemetry-sdk
+
+pytest==8.0.0
