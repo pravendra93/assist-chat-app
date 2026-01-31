@@ -14,3 +14,7 @@ langfuse
 opentelemetry-sdk
 
 pytest==8.0.0
+sqlalchemy
+asyncpg
+redis>=5.0.0
+fastapi-limiter>=0.1.6

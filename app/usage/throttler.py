@@ -9,11 +9,15 @@ from app.db.session import get_db
 COST_BUFFER_USD = 0.20  
 
 async def enforce_cost_limit(
-    tenant: dict,
+    tenant,
     db: AsyncSession = Depends(get_db),
 ):
-    tenant_id = tenant["tenant_id"]
-    daily_limit = tenant["daily_cost_limit"]
+    if hasattr(tenant, "id"):
+        tenant_id = tenant.id
+        daily_limit = tenant.daily_cost_limit
+    else:
+        tenant_id = tenant["tenant_id"]
+        daily_limit = tenant["daily_cost_limit"]
 
     today = datetime.now(timezone.utc).date()
 
