@@ -1,14 +1,21 @@
-version: '3.8'
-
 services:
   web:
     build: .
     ports:
-      - "8001:8000"
+      - "8001:8001"
     volumes:
       - ./app:/code/app
+      - ./tests:/code/tests
     environment:
       - WATCHFILES_FORCE_POLLING=true # Helps with hot reload in some environments
     env_file:
       - .env
-    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8001 --reload
+    # Health check for production readiness (FINDING-011)
+    healthcheck:
+      test: [ "CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8001/health')" ]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    restart: unless-stopped

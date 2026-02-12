@@ -14,3 +14,14 @@ langfuse
 opentelemetry-sdk
 
 pytest==8.0.0
+SQLAlchemy==2.0.22
+asyncpg==0.29.0
+
+openai>=1.0.0  # For OpenAI embeddings
+pgvector==0.2.4
+passlib[bcrypt]
+pytest-pythonpath
+passlib[argon2]
+fastapi-limiter  # For rate limiting (FINDING-005)
+pyrate-limiter  # Required by fastapi-limiter
+redis  # Required for fastapi-limiter
