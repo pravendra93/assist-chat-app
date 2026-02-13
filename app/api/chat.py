@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Response
 from pydantic import BaseModel, Field, validator
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
@@ -55,6 +55,7 @@ async def check_usage(
 )
 async def chat(
     payload: ChatRequest,
+    response: Response,
     tenant_data=Depends(check_usage),
     db: AsyncSession = Depends(get_db)
 ):
@@ -81,16 +82,19 @@ async def chat(
     messages = prompt_builder.build(payload.query, chunks)
 
     # 3. Call LLM
-    response = await get_chat_completion(messages, model="gpt-3.5-turbo")
-    answer = response.choices[0].message.content
+    llm_completion = await get_chat_completion(messages, model="gpt-3.5-turbo")
+    answer = llm_completion.choices[0].message.content
     
     # Calculate costs (approximate)
-    prompt_tokens = response.usage.prompt_tokens
-    completion_tokens = response.usage.completion_tokens
-    total_tokens = response.usage.total_tokens
+    prompt_tokens = llm_completion.usage.prompt_tokens
+    completion_tokens = llm_completion.usage.completion_tokens
+    total_tokens = llm_completion.usage.total_tokens
     
     # Pricing for gpt-3.5-turbo-0125: Input $0.50/1M, Output $1.50/1M
     cost_usd = (prompt_tokens * 0.50 / 1_000_000) + (completion_tokens * 1.50 / 1_000_000)
+    
+    # Expose cost to logging middleware
+    response.headers["X-Total-Cost"] = "{:.6f}".format(cost_usd)
 
     # 4. Persistence
     if payload.session_id:

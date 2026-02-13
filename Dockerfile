@@ -17,6 +17,9 @@ RUN pip install --no-cache-dir --upgrade -r /code/requirements.txt
 # Copy the rest of the application with proper ownership
 COPY --chown=appuser:appuser ./app /code/app
 
+# Pre-create logs directory with proper ownership (Fix for PermissionError)
+RUN mkdir -p /code/logs && chown appuser:appuser /code/logs
+
 # Switch to non-root user
 USER appuser
 

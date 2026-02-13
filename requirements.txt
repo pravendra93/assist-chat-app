@@ -21,7 +21,9 @@ openai>=1.0.0  # For OpenAI embeddings
 pgvector==0.2.4
 passlib[bcrypt]
 pytest-pythonpath
+pytest-mock
 passlib[argon2]
 fastapi-limiter  # For rate limiting (FINDING-005)
 pyrate-limiter  # Required by fastapi-limiter
 redis  # Required for fastapi-limiter
+boto3==1.34.0
