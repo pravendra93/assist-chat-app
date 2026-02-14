@@ -29,6 +29,36 @@ def json_formatter(record):
     record["extra"]["serialized"] = serialize(record)
     return "{extra[serialized]}\n"
 
+def health_filter(record):
+    """
+    Filters out logs related to the /health endpoint to reduce noise.
+    """
+    return "/health" not in record["message"]
+
+def dynamic_console_formatter(record):
+    """
+    Dynamic formatter for console that gracefully handles missing request_id.
+    """
+    # Use 'SYSTEM' if request_id is not present
+    req_id = record["extra"].get("request_id", "SYSTEM")
+    
+    # Custom format string
+    fmt = (
+        "<green>{time:YYYY-MM-DD HH:mm:ss.SSS}</green> | "
+        "<level>{level: <8}</level> | "
+        f"<cyan>{req_id}</cyan> - "
+        "<level>{message}</level>"
+    )
+    
+    # Add extra fields if they exist (excluding serialized and request_id which we already handled)
+    extra_items = {k: v for k, v in record["extra"].items() if k not in ["serialized", "request_id"]}
+    if extra_items:
+        # Escape curly braces because Loguru will try to format the returned string again
+        extra_str = str(extra_items).replace("{", "{{").replace("}", "}}")
+        fmt += f" <magenta>{extra_str}</magenta>"
+    
+    return fmt + "\n"
+
 def upload_to_spaces(file_path):
     """
     Uploads a file to DigitalOcean Spaces.
@@ -84,33 +114,48 @@ def setup_logging():
     # Remove default handlers
     logger.remove()
     
-    # Add JSON handler to stdout
+    # Sink 1: Human-readable console for development (DEBUG+)
     logger.add(
         sys.stdout,
-        format=json_formatter,
-        level="INFO",
+        format=dynamic_console_formatter,
+        filter=health_filter,
+        level="DEBUG",
         backtrace=True,
         diagnose=True,
+        enqueue=True
     )
 
-    # Add file handler with rotation and upload to Spaces
-    # Logs are stored locally in 'logs/' and uploaded after rotation
-    # Only enabled for staging and production
+    # File-based Sinks (Only enabled for staging and production)
     if settings.ENVIRONMENT in ["staging", "production"]:
-        log_file_path = "logs/assist-chat-app.log"
         os.makedirs("logs", exist_ok=True)
         
+        # Sink 2: JSON file for production monitoring (INFO+)
         logger.add(
-            log_file_path,
+            "logs/app.log",
             format=json_formatter,
+            filter=health_filter,
             level="INFO",
-            rotation="10 KB",  # Rotate when file reaches 10MB
-            compression=upload_to_spaces,  # Upload to Spaces after rotation
+            rotation="10 MB",
+            compression=upload_to_spaces,
             backtrace=True,
             diagnose=True,
+            enqueue=True
+        )
+
+        # Sink 3: Error-only JSON file for alerts (ERROR+)
+        logger.add(
+            "logs/errors.log",
+            format=json_formatter,
+            filter=health_filter,
+            level="ERROR",
+            rotation="10 MB",
+            compression=upload_to_spaces,
+            backtrace=True,
+            diagnose=True,
+            enqueue=True
         )
     else:
-        sys.stdout.write(f"Log uploading disabled for current environment: {settings.ENVIRONMENT}\n")
+        sys.stdout.write(f"File logging and Spaces upload disabled for current environment: {settings.ENVIRONMENT}\n")
 
     # Intercept standard library logging
     logging.basicConfig(handlers=[InterceptHandler()], level=0, force=True)

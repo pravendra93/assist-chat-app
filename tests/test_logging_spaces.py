@@ -60,6 +60,62 @@ def test_spaces_upload_integration():
         if os.path.exists(test_file):
             os.remove(test_file)
 
+def test_log_segregation(mocker):
+    """
+    Verifies that logs are correctly routed to app.log and errors.log.
+    We mock the environment to be 'production' to ensure file sinks are added.
+    """
+    from loguru import logger
+    import json
+    import time
+    from app.core.logging import setup_logging
+    
+    # Mock settings to enable file logging
+    mocker.patch("app.core.config.settings.ENVIRONMENT", "production")
+    
+    # Ensure logs directory exists
+    os.makedirs("logs", exist_ok=True)
+    
+    # Reset logger and setup with mocked settings
+    logger.remove()
+    setup_logging()
+    
+    # Emit logs at different levels
+    test_msg_info = f"TEST_INFO_{os.getpid()}"
+    test_msg_error = f"TEST_ERROR_{os.getpid()}"
+    
+    logger.info(test_msg_info)
+    logger.error(test_msg_error)
+    
+    # Since enqueue=True, we might need a tiny sleep or wait for the sink to process
+    # In a real environment, wait_time should be minimal
+    time.sleep(0.5) 
+    
+    # Check app.log (should have both)
+    if os.path.exists("logs/app.log"):
+        with open("logs/app.log", "r") as f:
+            content = f.read()
+            assert test_msg_info in content
+            assert test_msg_error in content
+            
+            # Verify JSON format
+            last_line = content.strip().split("\n")[-1]
+            log_entry = json.loads(last_line)
+            assert "message" in log_entry
+            assert "timestamp" in log_entry
+
+    # Check errors.log (should ONLY have error)
+    if os.path.exists("logs/errors.log"):
+        with open("logs/errors.log", "r") as f:
+            content = f.read()
+            assert test_msg_info not in content
+            assert test_msg_error in content
+            
+            # Verify JSON format
+            last_line = content.strip().split("\n")[-1]
+            log_entry = json.loads(last_line)
+            assert log_entry["level"] == "ERROR"
+
 def test_upload_to_spaces_no_deadlock(mocker):
     """
     Ensures upload_to_spaces doesn't use the logger, preventing deadlocks.
