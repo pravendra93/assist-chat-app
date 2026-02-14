@@ -24,5 +24,7 @@ class WidgetChatResponse(BaseModel):
     session_id: str
     metadata: Dict[str, Any] = {}
 
-    class Config:
-        populate_by_name = True
+    model_config = {
+        "populate_by_name": True,
+        "from_attributes": True
+    }

@@ -19,3 +19,11 @@ services:
       retries: 3
       start_period: 40s
     restart: unless-stopped
+    depends_on:
+      - redis
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    restart: unless-stopped

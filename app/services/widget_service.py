@@ -45,16 +45,16 @@ class WidgetService:
             if not active_tenant_config:
                 active_tenant_config = tenant_configs[0]
 
-        # 3. Merge Logic (TenantConfig has more priority)
-        # We'll use values from active_tenant_config if they exist, else chatbot_config
+        # 3. Merge Logic (ChatbotConfig has more priority)
+        # We'll use values from chatbot_config if they exist, else active_tenant_config
         
         config = {
             "tenant_id": tenant.id,
-            "chat_title": getattr(active_tenant_config, "brand_name", None) or getattr(chatbot_config, "name", None) or f"Chat with {tenant.name}",
-            "primary_color": getattr(active_tenant_config, "primary_color", None) or getattr(chatbot_config, "primary_color", None) or "#0ea5e9",
-            "welcome_message": getattr(active_tenant_config, "welcome_message", None) or getattr(chatbot_config, "welcome_message", None) or "Hello! How can I help you?",
-            "bot_name": getattr(active_tenant_config, "brand_name", None) or getattr(chatbot_config, "name", None) or f"{tenant.name} Bot",
-            "logo_url": getattr(active_tenant_config, "logo_url", None) or getattr(chatbot_config, "logo_url", None),
+            "chat_title": getattr(chatbot_config, "name", None) or getattr(active_tenant_config, "brand_name", None) or f"Chat with {tenant.name}",
+            "primary_color": getattr(chatbot_config, "primary_color", None) or getattr(active_tenant_config, "primary_color", None) or "#0ea5e9",
+            "welcome_message": getattr(chatbot_config, "welcome_message", None) or getattr(active_tenant_config, "welcome_message", None) or "Hello! How can I help you?",
+            "bot_name": getattr(chatbot_config, "name", None) or getattr(active_tenant_config, "brand_name", None) or f"{tenant.name} Bot",
+            "logo_url": getattr(chatbot_config, "logo_url", None) or getattr(active_tenant_config, "logo_url", None),
             "suggested_questions": ["How do I get started?", "What are your pricing plans?"] # Static for now
         }
 
