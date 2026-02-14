@@ -7,6 +7,9 @@ except ImportError:
     from pydantic import BaseSettings, validator
 
 class Settings(BaseSettings):
+    # Environment
+    ENVIRONMENT: str = os.getenv("ENVIRONMENT", "local")
+    
     # ... other settings can be added here as needed ...
     
     # Email Settings
