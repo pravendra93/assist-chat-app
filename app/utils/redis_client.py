@@ -1,4 +1,5 @@
 import redis.asyncio as redis
+from typing import Optional
 from app.core.config import settings
 from app.core.logging import logger
 
@@ -36,5 +37,32 @@ class RedisClient:
             await self._redis.close()
             self._redis = None
             logger.info("Redis connection closed")
+
+    async def set_cache(self, key: str, value: dict, ttl: int = 3600):
+        """
+        Store a dictionary in Redis as a JSON string with a TTL.
+        """
+        client = await self.get_client()
+        if client:
+            try:
+                import json
+                await client.set(key, json.dumps(value), ex=ttl)
+            except Exception as e:
+                logger.error(f"Error setting Redis cache for key {key}: {e}")
+
+    async def get_cache(self, key: str) -> Optional[dict]:
+        """
+        Retrieve a JSON string from Redis and return it as a dictionary.
+        """
+        client = await self.get_client()
+        if client:
+            try:
+                import json
+                data = await client.get(key)
+                if data:
+                    return json.loads(data)
+            except Exception as e:
+                logger.error(f"Error getting Redis cache for key {key}: {e}")
+        return None
 
 redis_client = RedisClient()

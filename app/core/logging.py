@@ -171,9 +171,11 @@ def setup_logging():
     logging.basicConfig(handlers=[InterceptHandler()], level=0, force=True)
     
     # Specific interceptors for common libraries
-    for name in ["uvicorn", "uvicorn.access", "fastapi"]:
+    for name in ["uvicorn", "uvicorn.access", "fastapi", "openai", "httpx"]:
         _logger = logging.getLogger(name)
         _logger.handlers = [InterceptHandler()]
         _logger.propagate = False
+        # Prevent noisy debug logs (like full prompts in Request options)
+        _logger.setLevel(logging.INFO)
 
     return logger

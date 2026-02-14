@@ -19,10 +19,36 @@ class ChatService:
     ) -> Tuple[str, str, Dict[str, Any]]:
         """
         Core RAG logic: Retrieve, Prompt, Call LLM.
+        Includes Redis caching for repeated EXACT queries within a tenant.
         Returns: (answer, session_id, metadata_for_persistence)
         """
+        from app.utils.redis_client import redis_client
+        import hashlib
         
-        # 1. Retrieve chunks
+        # 1. Check Cache
+        # Hash query for safe key usage (handling special characters/length)
+        query_hash = hashlib.md5(query.strip().lower().encode()).hexdigest()
+        cache_key = f"cache:chat:{tenant.id}:{query_hash}"
+        
+        if not session_id:
+            session_id = str(uuid.uuid4())
+            
+        cached_res = await redis_client.get_cache(cache_key)
+        if cached_res:
+            # We still return session_id and persistence data to keep history/usage tracking
+            # But the answer is near-instant and cost is 0 (cached)
+            persistence_data = {
+                "query": query,
+                "answer": cached_res["answer"],
+                "prompt_tokens": 0,
+                "completion_tokens": 0,
+                "total_tokens": 0,
+                "cost_usd": 0.0,
+                "cached": True
+            }
+            return cached_res["answer"], session_id, persistence_data
+
+        # (If cache miss) 2. Retrieve chunks
         embedding = await get_embedding(query)
         
         # Vector search using cosine distance
@@ -38,10 +64,10 @@ class ChatService:
         result = await db.execute(query_stmt)
         chunks = result.scalars().all()
         
-        # 2. Build prompt
+        # 3. Build prompt
         messages = self.prompt_builder.build(query, chunks)
 
-        # 3. Call LLM
+        # 4. Call LLM
         llm_completion = await get_chat_completion(messages, model="gpt-3.5-turbo")
         answer = llm_completion.choices[0].message.content
         
@@ -53,9 +79,6 @@ class ChatService:
         # Pricing for gpt-3.5-turbo-0125
         cost_usd = (prompt_tokens * 0.50 / 1_000_000) + (completion_tokens * 1.50 / 1_000_000)
         
-        if not session_id:
-            session_id = str(uuid.uuid4())
-
         persistence_data = {
             "query": query,
             "answer": answer,
@@ -63,7 +86,11 @@ class ChatService:
             "completion_tokens": completion_tokens,
             "total_tokens": total_tokens,
             "cost_usd": cost_usd,
+            "cached": False
         }
+
+        # 5. Save to Cache (24 hour TTL)
+        await redis_client.set_cache(cache_key, {"answer": answer}, ttl=86400)
 
         return answer, session_id, persistence_data
 
