@@ -16,10 +16,10 @@ class ChatService:
         tenant: Tenant,
         query: str,
         session_id: Optional[str] = None
-    ) -> Tuple[str, str, float]:
+    ) -> Tuple[str, str, Dict[str, Any]]:
         """
-        Core RAG logic: Retrieve, Prompt, Call LLM, Persist.
-        Returns: (answer, session_id, cost_usd)
+        Core RAG logic: Retrieve, Prompt, Call LLM.
+        Returns: (answer, session_id, metadata_for_persistence)
         """
         
         # 1. Retrieve chunks
@@ -53,75 +53,88 @@ class ChatService:
         # Pricing for gpt-3.5-turbo-0125
         cost_usd = (prompt_tokens * 0.50 / 1_000_000) + (completion_tokens * 1.50 / 1_000_000)
         
-        # 4. Persistence
-        if session_id:
-            # Verify conversation belongs to tenant
-            conv_result = await db.execute(
-                select(Conversation).where(
-                    Conversation.session_id == session_id,
-                    Conversation.tenant_id == tenant.id
-                )
-            )
-            conversation = conv_result.scalars().first()
-            if not conversation:
-                 conversation = Conversation(
-                    tenant_id=tenant.id,
-                    session_id=session_id
-                )
-                 db.add(conversation)
-                 await db.flush()
-        else:
+        if not session_id:
             session_id = str(uuid.uuid4())
+
+        persistence_data = {
+            "query": query,
+            "answer": answer,
+            "prompt_tokens": prompt_tokens,
+            "completion_tokens": completion_tokens,
+            "total_tokens": total_tokens,
+            "cost_usd": cost_usd,
+        }
+
+        return answer, session_id, persistence_data
+
+    async def persist_response(
+        self,
+        db: AsyncSession,
+        tenant_id: uuid.UUID,
+        session_id: str,
+        data: Dict[str, Any]
+    ):
+        """
+        Save conversation history, usage, and analytics to the database.
+        Designed to be run as a background task.
+        """
+        # 1. Handle Conversation
+        conv_result = await db.execute(
+            select(Conversation).where(
+                Conversation.session_id == session_id,
+                Conversation.tenant_id == tenant_id
+            )
+        )
+        conversation = conv_result.scalars().first()
+        if not conversation:
             conversation = Conversation(
-                tenant_id=tenant.id,
+                tenant_id=tenant_id,
                 session_id=session_id
             )
             db.add(conversation)
             await db.flush()
 
-        # Save Messages
+        # 2. Save Messages
         user_msg = Message(
             conversation_id=conversation.id,
             sender="user",
-            text=query
+            text=data["query"]
         )
         db.add(user_msg)
         
         bot_msg = Message(
             conversation_id=conversation.id,
             sender="assistant",
-            text=answer
+            text=data["answer"]
         )
         db.add(bot_msg)
         await db.flush()
         
-        # Save Usage
+        # 3. Save Usage
         llm_usage = LLMUsage(
-            tenant_id=tenant.id,
+            tenant_id=tenant_id,
             conversation_id=conversation.id,
             message_id=bot_msg.id,
             model="gpt-3.5-turbo",
-            prompt_tokens=prompt_tokens,
-            completion_tokens=completion_tokens,
-            total_tokens=total_tokens,
-            cost_usd=cost_usd,
+            prompt_tokens=data["prompt_tokens"],
+            completion_tokens=data["completion_tokens"],
+            total_tokens=data["total_tokens"],
+            cost_usd=data["cost_usd"],
         )
         db.add(llm_usage)
         
-        # Analytics
+        # 4. Analytics
         event = AnalyticsEvent(
-            tenant_id=tenant.id,
+            tenant_id=tenant_id,
             event_type="chat_completion",
             payload={
                 "conversation_id": str(conversation.id),
-                "tokens": total_tokens,
-                "cost": float(cost_usd)
+                "tokens": data["total_tokens"],
+                "cost": float(data["cost_usd"])
             }
         )
         db.add(event)
         
         await db.commit()
-
-        return answer, session_id, cost_usd
 
 chat_service = ChatService()

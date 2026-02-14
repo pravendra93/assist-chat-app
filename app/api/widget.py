@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, Request, Response
+from fastapi import APIRouter, Depends, Request, Response, BackgroundTasks
 from pyrate_limiter import Duration, Limiter, Rate
 from fastapi_limiter.depends import RateLimiter
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -53,6 +53,7 @@ async def widget_chat(
     request: Request,
     response: Response,
     chat_req: WidgetChatRequest,
+    background_tasks: BackgroundTasks,
     tenant_data: tuple[Tenant, ApiKey] = Depends(check_usage),
     db: AsyncSession = Depends(get_db)
 ):
@@ -67,15 +68,24 @@ async def widget_chat(
     await validate_domain_whitelist(request, whitelisted_domains)
     
     # 2. Use the shared ChatService for communication
-    answer, session_id, cost_usd = await chat_service.get_response(
+    answer, session_id, persistence_data = await chat_service.get_response(
         db=db,
         tenant=tenant,
         query=chat_req.message,
         session_id=chat_req.session_id
     )
     
-    # 3. Expose cost to logging middleware
-    response.headers["X-Total-Cost"] = "{:.6f}".format(cost_usd)
+    # 3. Schedule persistence in the background
+    background_tasks.add_task(
+        chat_service.persist_response,
+        db=db,
+        tenant_id=tenant.id,
+        session_id=session_id,
+        data=persistence_data
+    )
+    
+    # 4. Expose cost to logging middleware
+    response.headers["X-Total-Cost"] = "{:.6f}".format(persistence_data["cost_usd"])
     
     return WidgetChatResponse(
         answer=answer,

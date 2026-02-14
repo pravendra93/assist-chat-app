@@ -6,6 +6,7 @@ services:
     volumes:
       - ./app:/code/app
       - ./tests:/code/tests
+      - ./static:/code/static
     environment:
       - WATCHFILES_FORCE_POLLING=true # Helps with hot reload in some environments
     env_file:

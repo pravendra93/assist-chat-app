@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, Response
+from fastapi import APIRouter, Depends, HTTPException, Response, BackgroundTasks
 from pydantic import BaseModel, Field, validator
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
@@ -57,20 +57,30 @@ async def check_usage(
 async def chat(
     payload: ChatRequest,
     response: Response,
+    background_tasks: BackgroundTasks,
     tenant_data=Depends(check_usage),
     db: AsyncSession = Depends(get_db)
 ):
     tenant, api_key = tenant_data
     
-    answer, session_id, cost_usd = await chat_service.get_response(
+    answer, session_id, persistence_data = await chat_service.get_response(
         db=db,
         tenant=tenant,
         query=payload.query,
         session_id=payload.session_id
     )
     
+    # Schedule persistence in the background
+    background_tasks.add_task(
+        chat_service.persist_response,
+        db=db,
+        tenant_id=tenant.id,
+        session_id=session_id,
+        data=persistence_data
+    )
+    
     # Expose cost to logging middleware
-    response.headers["X-Total-Cost"] = "{:.6f}".format(cost_usd)
+    response.headers["X-Total-Cost"] = "{:.6f}".format(persistence_data["cost_usd"])
 
     return ChatResponse(
         answer=answer,
