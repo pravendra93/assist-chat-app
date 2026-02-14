@@ -8,15 +8,13 @@ app = FastAPI(
     version="0.1.0"
 )
 
-# CORS Configuration (FINDING-009)
-# For development, allow localhost. In production, replace with actual domains
+# CORS Configuration
+# Allow all origins since the chat widget is embedded on third-party client websites.
+# Security is handled via the ASST-API-Key header, not CORS.
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=settings.BACKEND_CORS_ORIGINS if settings.BACKEND_CORS_ORIGINS else [
-        "http://localhost:3000",
-        "http://localhost:8000"
-    ],
-    allow_credentials=True,
+    allow_origins=["*"],
+    allow_credentials=False,
     allow_methods=["POST", "GET", "OPTIONS"],
     allow_headers=["ASST-API-Key", "Content-Type", "Authorization"],
 )
