@@ -48,51 +48,70 @@ class ChatService:
             }
             return cached_res["answer"], session_id, persistence_data
 
-        # (If cache miss) 2. Retrieve chunks
-        embedding = await get_embedding(query)
-        
-        # Vector search using cosine distance
-        query_stmt = select(KnowledgeBaseChunk).join(
-            KnowledgeBaseEmbedding, KnowledgeBaseChunk.id == KnowledgeBaseEmbedding.chunk_id
-        ).where(
-            KnowledgeBaseEmbedding.tenant_id == tenant.id,
-            KnowledgeBaseEmbedding.model == "text-embedding-3-small"
-        ).order_by(
-            KnowledgeBaseEmbedding.embedding.cosine_distance(embedding)
-        ).limit(3)
-        
-        result = await db.execute(query_stmt)
-        chunks = result.scalars().all()
-        
-        # 3. Build prompt
-        messages = self.prompt_builder.build(query, chunks)
+        try:
+            # (If cache miss) 2. Retrieve chunks
+            embedding = await get_embedding(query)
+            
+            # Vector search using cosine distance
+            query_stmt = select(KnowledgeBaseChunk).join(
+                KnowledgeBaseEmbedding, KnowledgeBaseChunk.id == KnowledgeBaseEmbedding.chunk_id
+            ).where(
+                KnowledgeBaseEmbedding.tenant_id == tenant.id,
+                KnowledgeBaseEmbedding.model == "text-embedding-3-small"
+            ).order_by(
+                KnowledgeBaseEmbedding.embedding.cosine_distance(embedding)
+            ).limit(3)
+            
+            result = await db.execute(query_stmt)
+            chunks = result.scalars().all()
+            
+            # 3. Build prompt
+            messages = self.prompt_builder.build(query, chunks)
 
-        # 4. Call LLM
-        llm_completion = await get_chat_completion(messages, model="gpt-3.5-turbo")
-        answer = llm_completion.choices[0].message.content
-        
-        # Calculate costs
-        prompt_tokens = llm_completion.usage.prompt_tokens
-        completion_tokens = llm_completion.usage.completion_tokens
-        total_tokens = llm_completion.usage.total_tokens
-        
-        # Pricing for gpt-3.5-turbo-0125
-        cost_usd = (prompt_tokens * 0.50 / 1_000_000) + (completion_tokens * 1.50 / 1_000_000)
-        
-        persistence_data = {
-            "query": query,
-            "answer": answer,
-            "prompt_tokens": prompt_tokens,
-            "completion_tokens": completion_tokens,
-            "total_tokens": total_tokens,
-            "cost_usd": cost_usd,
-            "cached": False
-        }
+            # 4. Call LLM
+            llm_completion = await get_chat_completion(messages, model="gpt-3.5-turbo")
+            answer = llm_completion.choices[0].message.content
+            
+            # Calculate costs
+            prompt_tokens = llm_completion.usage.prompt_tokens
+            completion_tokens = llm_completion.usage.completion_tokens
+            total_tokens = llm_completion.usage.total_tokens
+            
+            # Pricing for gpt-3.5-turbo-0125
+            cost_usd = (prompt_tokens * 0.50 / 1_000_000) + (completion_tokens * 1.50 / 1_000_000)
+            
+            persistence_data = {
+                "query": query,
+                "answer": answer,
+                "prompt_tokens": prompt_tokens,
+                "completion_tokens": completion_tokens,
+                "total_tokens": total_tokens,
+                "cost_usd": cost_usd,
+                "cached": False
+            }
 
-        # 5. Save to Cache (24 hour TTL)
-        await redis_client.set_cache(cache_key, {"answer": answer}, ttl=86400)
+            # 5. Save to Cache (24 hour TTL)
+            await redis_client.set_cache(cache_key, {"answer": answer}, ttl=86400)
 
-        return answer, session_id, persistence_data
+            return answer, session_id, persistence_data
+
+        except Exception as e:
+            from app.core.logging import logger
+            logger.error(f"ChatService Error for tenant {tenant.id}: {e}")
+            
+            # Return graceful error message to user
+            fallback_answer = "I'm having trouble thinking right now. Please try again."
+            persistence_data = {
+                "query": query,
+                "answer": fallback_answer,
+                "prompt_tokens": 0,
+                "completion_tokens": 0,
+                "total_tokens": 0,
+                "cost_usd": 0.0,
+                "cached": False,
+                "error": True
+            }
+            return fallback_answer, session_id, persistence_data
 
     async def persist_response(
         self,
