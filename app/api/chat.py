@@ -10,11 +10,13 @@ from app.db.models import KnowledgeBaseChunk, KnowledgeBaseEmbedding, Conversati
 from app.core.llm import get_embedding, get_chat_completion
 from app.usage.throttler import enforce_cost_limit
 from app.prompt.builder import PromptBuilder
+from app.tasks.background import persist_chat_response
+import uuid
+
+from app.services.chat_service import chat_service
 import uuid
 
 router = APIRouter()
-
-prompt_builder = PromptBuilder()
 
 class ChatRequest(BaseModel):
     query: str = Field(..., min_length=1, max_length=4000, description="User query")
@@ -47,7 +49,7 @@ async def check_usage(
     await enforce_cost_limit(tenant_dict, db)
     return tenant, api_key
 
-# Apply rate limiting: 10 requests per 60 seconds (FINDING-005)
+# Apply rate limiting: 10 requests per 60 seconds
 @router.post(
     "/",
     response_model=ChatResponse,
@@ -61,110 +63,22 @@ async def chat(
 ):
     tenant, api_key = tenant_data
     
-    # 1. Retrieve chunks
-    embedding = await get_embedding(payload.query)
+    answer, session_id, persistence_data = await chat_service.get_response(
+        db=db,
+        tenant=tenant,
+        query=payload.query,
+        session_id=payload.session_id
+    )
     
-    # Vector search using cosine distance (<=> operator in pgvector)
-    # We join with chunks to get content
-    query = select(KnowledgeBaseChunk).join(
-        KnowledgeBaseEmbedding, KnowledgeBaseChunk.id == KnowledgeBaseEmbedding.chunk_id
-    ).where(
-        KnowledgeBaseEmbedding.tenant_id == tenant.id,
-        KnowledgeBaseEmbedding.model == "text-embedding-3-small" # Match embedding model
-    ).order_by(
-        KnowledgeBaseEmbedding.embedding.cosine_distance(embedding)
-    ).limit(3)
-    
-    result = await db.execute(query)
-    chunks = result.scalars().all()
-    
-    # 2. Build prompt using PromptBuilder
-    messages = prompt_builder.build(payload.query, chunks)
-
-    # 3. Call LLM
-    llm_completion = await get_chat_completion(messages, model="gpt-3.5-turbo")
-    answer = llm_completion.choices[0].message.content
-    
-    # Calculate costs (approximate)
-    prompt_tokens = llm_completion.usage.prompt_tokens
-    completion_tokens = llm_completion.usage.completion_tokens
-    total_tokens = llm_completion.usage.total_tokens
-    
-    # Pricing for gpt-3.5-turbo-0125: Input $0.50/1M, Output $1.50/1M
-    cost_usd = (prompt_tokens * 0.50 / 1_000_000) + (completion_tokens * 1.50 / 1_000_000)
+    # Schedule persistence in the background via Celery
+    persist_chat_response.delay(
+        tenant_id_str=str(tenant.id),
+        session_id=session_id,
+        data=persistence_data
+    )
     
     # Expose cost to logging middleware
-    response.headers["X-Total-Cost"] = "{:.6f}".format(cost_usd)
-
-    # 4. Persistence
-    if payload.session_id:
-        session_id = payload.session_id
-        # SECURITY: Verify conversation belongs to tenant (FINDING-002)
-        conv_result = await db.execute(
-            select(Conversation).where(
-                Conversation.session_id == session_id,
-                Conversation.tenant_id == tenant.id  # Prevent session hijacking
-            )
-        )
-        conversation = conv_result.scalars().first()
-        if not conversation:
-             conversation = Conversation(
-                tenant_id=tenant.id,
-                session_id=session_id
-            )
-             db.add(conversation)
-             await db.flush() # to get ID
-    else:
-        session_id = str(uuid.uuid4())
-        conversation = Conversation(
-            tenant_id=tenant.id,
-            session_id=session_id
-        )
-        db.add(conversation)
-        await db.flush()
-
-    # Save Messages
-    user_msg = Message(
-        conversation_id=conversation.id,
-        sender="user",
-        text=payload.query
-    )
-    db.add(user_msg)
-    
-    bot_msg = Message(
-        conversation_id=conversation.id,
-        sender="assistant",
-        text=answer
-    )
-    db.add(bot_msg)
-    await db.flush()
-    
-    # Save Usage
-    llm_usage = LLMUsage(
-        tenant_id=tenant.id,
-        conversation_id=conversation.id,
-        message_id=bot_msg.id,
-        model="gpt-3.5-turbo",
-        prompt_tokens=prompt_tokens,
-        completion_tokens=completion_tokens,
-        total_tokens=total_tokens,
-        cost_usd=cost_usd,
-    )
-    db.add(llm_usage)
-    
-    # Analytics
-    event = AnalyticsEvent(
-        tenant_id=tenant.id,
-        event_type="chat_completion",
-        payload={
-            "conversation_id": str(conversation.id),
-            "tokens": total_tokens,
-            "cost": float(cost_usd)
-        }
-    )
-    db.add(event)
-    
-    await db.commit()
+    response.headers["X-Total-Cost"] = "{:.6f}".format(persistence_data["cost_usd"])
 
     return ChatResponse(
         answer=answer,

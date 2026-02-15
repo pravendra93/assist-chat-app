@@ -2,16 +2,31 @@ import time
 import uuid
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
+from contextlib import asynccontextmanager
 from app.api.chat import router as chat_router
+from app.api.widget import router as widget_router
 from app.core.config import settings
 from app.core.logging import setup_logging, logger
+from app.utils.redis_client import redis_client
 
 # Setup structured logging
 setup_logging()
 
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Startup logic
+    await redis_client.connect()
+    logger.info("Application startup: Redis connected")
+    yield
+    # Shutdown logic
+    await redis_client.close()
+    logger.info("Application shutdown: Redis closed")
+
 app = FastAPI(
     title="RAG Chat Service",
-    version="0.1.0"
+    version="0.1.0",
+    lifespan=lifespan
 )
 
 # CORS Configuration
@@ -64,7 +79,12 @@ async def log_requests(request: Request, call_next):
             )
             raise
 
+# Static Files (for Widget script)
+app.mount("/static", StaticFiles(directory="static"), name="static")
+
+# Routes
 app.include_router(chat_router, prefix="/v1/chat")
+app.include_router(widget_router, prefix="/v1/widget")
 
 @app.get("/")
 async def root():

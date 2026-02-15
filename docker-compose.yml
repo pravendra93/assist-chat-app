@@ -6,6 +6,7 @@ services:
     volumes:
       - ./app:/code/app
       - ./tests:/code/tests
+      - ./static:/code/static
     environment:
       - WATCHFILES_FORCE_POLLING=true # Helps with hot reload in some environments
     env_file:
@@ -18,4 +19,24 @@ services:
       timeout: 10s
       retries: 3
       start_period: 40s
+    restart: unless-stopped
+    depends_on:
+      - redis
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    restart: unless-stopped
+
+  worker:
+    build: .
+    command: celery -A app.worker worker --loglevel=info
+    volumes:
+      - ./app:/code/app
+    env_file:
+      - .env
+    depends_on:
+      - redis
+      - web
     restart: unless-stopped

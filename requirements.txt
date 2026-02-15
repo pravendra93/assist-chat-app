@@ -27,3 +27,4 @@ fastapi-limiter  # For rate limiting (FINDING-005)
 pyrate-limiter  # Required by fastapi-limiter
 redis  # Required for fastapi-limiter
 boto3==1.34.0
+celery[redis]

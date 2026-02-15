@@ -59,34 +59,44 @@ def dynamic_console_formatter(record):
     
     return fmt + "\n"
 
+# Shared Boto3 client for DigitalOcean Spaces
+_spaces_client = None
+
+def get_spaces_client():
+    global _spaces_client
+    if _spaces_client is None:
+        if all([
+            settings.SPACES_ACCESS_KEY_ID, 
+            settings.SPACES_SECRET_ACCESS_KEY,
+            settings.SPACES_BUCKET,
+            settings.SPACES_ENDPOINT
+        ]):
+            try:
+                session = boto3.session.Session()
+                _spaces_client = session.client(
+                    's3',
+                    region_name=settings.SPACES_REGION,
+                    endpoint_url=settings.SPACES_ENDPOINT,
+                    aws_access_key_id=settings.SPACES_ACCESS_KEY_ID,
+                    aws_secret_access_key=settings.SPACES_SECRET_ACCESS_KEY,
+                    config=Config(signature_version='s3v4')
+                )
+            except Exception as e:
+                sys.stderr.write(f"Failed to initialize DigitalOcean Spaces client: {e}\n")
+    return _spaces_client
+
 def upload_to_spaces(file_path):
     """
-    Uploads a file to DigitalOcean Spaces.
+    Uploads a file to DigitalOcean Spaces using a shared client.
     Used as an after-rotation hook for loguru.
     """
-    if not all([
-        settings.SPACES_ACCESS_KEY_ID, 
-        settings.SPACES_SECRET_ACCESS_KEY,
-        settings.SPACES_BUCKET,
-        settings.SPACES_ENDPOINT
-    ]):
-        sys.stderr.write("DigitalOcean Spaces credentials not fully configured. Skipping log upload.\n")
+    client = get_spaces_client()
+    if not client:
         return
 
     try:
-        session = boto3.session.Session()
-        client = session.client(
-            's3',
-            region_name=settings.SPACES_REGION,
-            endpoint_url=settings.SPACES_ENDPOINT,
-            aws_access_key_id=settings.SPACES_ACCESS_KEY_ID,
-            aws_secret_access_key=settings.SPACES_SECRET_ACCESS_KEY,
-            config=Config(signature_version='s3v4')
-        )
-
         file_name = os.path.basename(file_path)
         # Bucket route: dev-assistra/dev-logs/assist-chat-app
-        # Since SPACES_BUCKET is 'dev-assistra', the key should start with 'dev-logs/assist-chat-app/'
         object_name = f"dev-logs/assist-chat-app/{file_name}"
         
         client.upload_file(file_path, settings.SPACES_BUCKET, object_name)
@@ -161,9 +171,11 @@ def setup_logging():
     logging.basicConfig(handlers=[InterceptHandler()], level=0, force=True)
     
     # Specific interceptors for common libraries
-    for name in ["uvicorn", "uvicorn.access", "fastapi"]:
+    for name in ["uvicorn", "uvicorn.access", "fastapi", "openai", "httpx"]:
         _logger = logging.getLogger(name)
         _logger.handlers = [InterceptHandler()]
         _logger.propagate = False
+        # Prevent noisy debug logs (like full prompts in Request options)
+        _logger.setLevel(logging.INFO)
 
     return logger

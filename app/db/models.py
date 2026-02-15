@@ -51,6 +51,43 @@ class Tenant(Base):
                            server_default=func.now())
 
 
+class TenantConfig(Base):
+    __tablename__ = "tenant_configs"
+    id = sa.Column(postgresql.UUID(as_uuid=True),
+                   primary_key=True, default=gen_uuid)
+    tenant_id = sa.Column(postgresql.UUID(as_uuid=True),
+                          sa.ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False)
+    domain = sa.Column(sa.String, nullable=True)
+    brand_name = sa.Column(sa.String, nullable=True)
+    primary_color = sa.Column(sa.String, server_default='#0ea5e9')
+    logo_url = sa.Column(sa.String, nullable=True)
+    welcome_message = sa.Column(sa.String, server_default='Hello! How can I help you?')
+    chat_icon = sa.Column(sa.String, server_default='message')
+    created_at = sa.Column(sa.DateTime(timezone=True),
+                           server_default=func.now())
+    updated_at = sa.Column(sa.DateTime(timezone=True),
+                           server_default=func.now(), onupdate=func.now())
+
+
+class ChatbotConfig(Base):
+    __tablename__ = "chatbot_configs"
+    id = sa.Column(postgresql.UUID(as_uuid=True),
+                   primary_key=True, default=gen_uuid)
+    tenant_id = sa.Column(postgresql.UUID(as_uuid=True),
+                          sa.ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False, unique=True)
+    name = sa.Column(sa.String, nullable=False, server_default='Support Assistant')
+    welcome_message = sa.Column(sa.String, server_default='Hi! How can I help you today?')
+    is_active = sa.Column(sa.Boolean, nullable=False, server_default=sa.sql.expression.true())
+    primary_color = sa.Column(sa.String, server_default='#000000')
+    background_color = sa.Column(sa.String, server_default='#ffffff')
+    logo_url = sa.Column(sa.String, nullable=True)
+    position = sa.Column(sa.String, server_default='bottom-right')
+    created_at = sa.Column(sa.DateTime(timezone=True),
+                           server_default=func.now())
+    updated_at = sa.Column(sa.DateTime(timezone=True),
+                           server_default=func.now(), onupdate=func.now())
+
+
 class TenantUser(Base):
     __tablename__ = "tenant_users"
     id = sa.Column(postgresql.UUID(as_uuid=True),

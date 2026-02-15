@@ -59,6 +59,9 @@ class Settings(BaseSettings):
             return v
         raise ValueError(v)
 
+    # Redis
+    REDIS_URL: str = os.getenv("REDIS_URL", "redis://localhost:6379/0")
+
     class Config:
         env_file = ".env"
         extra = "ignore"

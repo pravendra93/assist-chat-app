@@ -16,8 +16,7 @@ class AccountOut(BaseModel):
     role: Optional[str] = None
     created_at: Optional[datetime] = None
 
-    class Config:
-        orm_mode = True
+    model_config = {"from_attributes": True}
 
 
 
@@ -30,8 +29,7 @@ class MessageOut(BaseModel):
     meta: Optional[Dict[str, Any]] = None
     created_at: datetime
 
-    class Config:
-        orm_mode = True
+    model_config = {"from_attributes": True}
 
 
 
@@ -46,8 +44,7 @@ class TenantOut(BaseModel):
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
 
-    class Config:
-        orm_mode = True
+    model_config = {"from_attributes": True}
 
 
 
@@ -61,8 +58,7 @@ class TenantUserOut(BaseModel):
     is_active: bool
     created_at: Optional[datetime] = None
 
-    class Config:
-        orm_mode = True
+    model_config = {"from_attributes": True}
 
 
 
