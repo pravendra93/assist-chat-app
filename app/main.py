@@ -6,6 +6,7 @@ from fastapi.staticfiles import StaticFiles
 from contextlib import asynccontextmanager
 from app.api.chat import router as chat_router
 from app.api.widget import router as widget_router
+from app.api.internal import router as internal_router
 from app.core.config import settings
 from app.core.logging import setup_logging, logger
 from app.utils.redis_client import redis_client
@@ -85,6 +86,7 @@ app.mount("/static", StaticFiles(directory="static"), name="static")
 # Routes
 app.include_router(chat_router, prefix="/v1/chat")
 app.include_router(widget_router, prefix="/v1/widget")
+app.include_router(internal_router, prefix="/v1/internal", tags=["internal"])
 
 @app.get("/")
 async def root():

@@ -65,4 +65,22 @@ class RedisClient:
                 logger.error(f"Error getting Redis cache for key {key}: {e}")
         return None
 
+    async def delete_by_pattern(self, pattern: str):
+        """
+        Delete all keys matching the given pattern.
+        """
+        client = await self.get_client()
+        if client:
+            try:
+                # Use SCAN to find keys instead of KEYS (more performance-friendly for large DBs)
+                cursor = 0
+                while True:
+                    cursor, keys = await client.scan(cursor=cursor, match=pattern, count=100)
+                    if keys:
+                        await client.delete(*keys)
+                    if cursor == 0:
+                        break
+            except Exception as e:
+                logger.error(f"Error deleting Redis keys with pattern {pattern}: {e}")
+
 redis_client = RedisClient()
