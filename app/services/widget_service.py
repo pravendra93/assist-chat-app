@@ -76,6 +76,12 @@ class WidgetService:
         # 4. Save to Cache (1 hour TTL)
         await redis_client.set_cache(cache_key, config, ttl=3600)
 
-        return config
+    async def invalidate_cache(self, tenant_id: str):
+        """
+        Invalidate all cached widget configurations for a specific tenant.
+        """
+        from app.utils.redis_client import redis_client
+        pattern = f"cache:config:{tenant_id}:*"
+        await redis_client.delete_by_pattern(pattern)
 
 widget_service = WidgetService()

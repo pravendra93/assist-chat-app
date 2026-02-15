@@ -62,6 +62,9 @@ class Settings(BaseSettings):
     # Redis
     REDIS_URL: str = os.getenv("REDIS_URL", "redis://localhost:6379/0")
 
+    # Internal Security
+    INTERNAL_CACHE_HEADER: Optional[str] = os.getenv("INTERNAL_CACHE_HEADER")
+
     class Config:
         env_file = ".env"
         extra = "ignore"
