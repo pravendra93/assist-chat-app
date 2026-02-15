@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, Response, BackgroundTasks
+from fastapi import APIRouter, Depends, HTTPException, Response
 from pydantic import BaseModel, Field, validator
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
@@ -10,6 +10,7 @@ from app.db.models import KnowledgeBaseChunk, KnowledgeBaseEmbedding, Conversati
 from app.core.llm import get_embedding, get_chat_completion
 from app.usage.throttler import enforce_cost_limit
 from app.prompt.builder import PromptBuilder
+from app.tasks.background import persist_chat_response
 import uuid
 
 from app.services.chat_service import chat_service
@@ -57,7 +58,6 @@ async def check_usage(
 async def chat(
     payload: ChatRequest,
     response: Response,
-    background_tasks: BackgroundTasks,
     tenant_data=Depends(check_usage),
     db: AsyncSession = Depends(get_db)
 ):
@@ -70,11 +70,9 @@ async def chat(
         session_id=payload.session_id
     )
     
-    # Schedule persistence in the background
-    background_tasks.add_task(
-        chat_service.persist_response,
-        db=db,
-        tenant_id=tenant.id,
+    # Schedule persistence in the background via Celery
+    persist_chat_response.delay(
+        tenant_id_str=str(tenant.id),
         session_id=session_id,
         data=persistence_data
     )

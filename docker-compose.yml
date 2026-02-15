@@ -28,3 +28,15 @@ services:
     ports:
       - "6379:6379"
     restart: unless-stopped
+
+  worker:
+    build: .
+    command: celery -A app.worker worker --loglevel=info
+    volumes:
+      - ./app:/code/app
+    env_file:
+      - .env
+    depends_on:
+      - redis
+      - web
+    restart: unless-stopped

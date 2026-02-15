@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, Request, Response, BackgroundTasks
+from fastapi import APIRouter, Depends, Request, Response
 from pyrate_limiter import Duration, Limiter, Rate
 from fastapi_limiter.depends import RateLimiter
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -9,6 +9,7 @@ from app.services.chat_service import chat_service
 from app.services.widget_service import widget_service
 from app.middleware.anti_abuse import validate_domain_whitelist
 from app.db.models import Tenant, ApiKey
+from app.tasks.background import persist_chat_response
 
 router = APIRouter()
 
@@ -53,7 +54,6 @@ async def widget_chat(
     request: Request,
     response: Response,
     chat_req: WidgetChatRequest,
-    background_tasks: BackgroundTasks,
     tenant_data: tuple[Tenant, ApiKey] = Depends(check_usage),
     db: AsyncSession = Depends(get_db)
 ):
@@ -75,11 +75,9 @@ async def widget_chat(
         session_id=chat_req.session_id
     )
     
-    # 3. Schedule persistence in the background
-    background_tasks.add_task(
-        chat_service.persist_response,
-        db=db,
-        tenant_id=tenant.id,
+    # 3. Schedule persistence in the background via Celery
+    persist_chat_response.delay(
+        tenant_id_str=str(tenant.id),
         session_id=session_id,
         data=persistence_data
     )
