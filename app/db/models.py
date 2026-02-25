@@ -44,11 +44,21 @@ class Tenant(Base):
     owner_account_id = sa.Column(postgresql.UUID(
         as_uuid=True), sa.ForeignKey("accounts.id"), nullable=True)
     status = sa.Column(sa.String, default="pending")
-    plan = sa.Column(sa.String, default="trial")
+    plan_id = sa.Column(postgresql.UUID(as_uuid=True), sa.ForeignKey("plans.id"), nullable=True)
     created_at = sa.Column(sa.DateTime(timezone=True),
                            server_default=func.now())
     updated_at = sa.Column(sa.DateTime(timezone=True),
                            server_default=func.now())
+    trial_ends_at = sa.Column(sa.DateTime(timezone=True), nullable=True)
+    is_trial = sa.Column(sa.Boolean, default=True)
+
+
+    # relationships
+    plan_rel = relationship("Plan")
+
+    @property
+    def plan(self):
+        return self.plan_rel.name if self.plan_rel else "trial"
 
 
 class TenantConfig(Base):
@@ -175,6 +185,35 @@ class AnalyticsEvent(Base):
     created_at = sa.Column(sa.DateTime(timezone=True),
                            server_default=func.now())
 
+
+class Coupon(Base):
+    __tablename__ = "coupons"
+    id = sa.Column(postgresql.UUID(as_uuid=True),
+                   primary_key=True, default=gen_uuid)
+    coupon_code = sa.Column(sa.String, nullable=False)
+    description = sa.Column(sa.String, nullable=True)
+    discount_amount = sa.Column(sa.Numeric(10, 2), nullable=True)
+    discount_percentage = sa.Column(sa.Numeric(5, 2), nullable=True)
+    max_uses = sa.Column(sa.Integer, nullable=True)
+    current_uses = sa.Column(sa.Integer, default=0)
+    is_active = sa.Column(sa.Boolean, default=True)
+    created_by = sa.Column(postgresql.UUID(as_uuid=True), sa.ForeignKey(
+        "tenant_users.id"), nullable=True)
+    created_at = sa.Column(sa.DateTime(timezone=True),
+                           server_default=func.now())
+    updated_at = sa.Column(sa.DateTime(timezone=True),
+                           server_default=func.now())
+
+
+class CouponUsage(Base):
+    __tablename__ = "coupon_usages"
+    id = sa.Column(postgresql.UUID(as_uuid=True),
+                   primary_key=True, default=gen_uuid)
+    coupon_id = sa.Column(postgresql.UUID(as_uuid=True), sa.ForeignKey(
+        "coupons.id"), nullable=False, index=True)
+    user_id = sa.Column(sa.String, nullable=True)
+    applied_at = sa.Column(sa.DateTime(timezone=True),
+                           server_default=func.now())
 
 class Plan(Base):
     __tablename__ = "plans"
@@ -335,9 +374,43 @@ class KnowledgeBaseEmbedding(Base):
 
     # Use pgvector's Vector type for the embedding column
     embedding = sa.Column(Vector(1536), nullable=False)
-    
     created_at = sa.Column(sa.DateTime(timezone=True),
                            server_default=func.now())
+
+
+class TenantLimitsOverride(Base):
+    __tablename__ = "tenant_limits_overrides"
+    id = sa.Column(postgresql.UUID(as_uuid=True),
+                   primary_key=True, default=gen_uuid)
+    tenant_id = sa.Column(postgresql.UUID(as_uuid=True), sa.ForeignKey(
+        "tenants.id", ondelete="CASCADE"), nullable=False, unique=True)
+
+    # Financial Limits
+    monthly_spend_limit_usd = sa.Column(sa.Numeric(10, 2), default=50.00)
+    daily_spend_limit_usd = sa.Column(sa.Numeric(10, 2), default=5.00)
+
+    # Usage Limits
+    max_requests_per_minute = sa.Column(sa.Integer, default=30)
+    max_requests_per_day = sa.Column(sa.Integer, default=2000)
+    max_concurrent_sessions = sa.Column(sa.Integer, default=100)
+
+    # AI Limits
+    max_tokens_per_request = sa.Column(sa.Integer, default=1500)
+    max_chunks_per_query = sa.Column(sa.Integer, default=5)
+
+    # Knowledge Base Limits
+    max_files = sa.Column(sa.Integer, default=50)
+    max_total_storage_mb = sa.Column(sa.Integer, default=500)
+    max_embeddings_per_month = sa.Column(sa.Integer, default=50000)
+
+    # Safety Controls
+    auto_suspend_on_limit = sa.Column(sa.Boolean, default=True)
+    notify_on_80_percent = sa.Column(sa.Boolean, default=True)
+
+    created_at = sa.Column(sa.DateTime(timezone=True),
+                           server_default=func.now())
+    updated_at = sa.Column(sa.DateTime(timezone=True),
+                           server_default=func.now(), onupdate=func.now())
 
 
 class LLMUsage(Base):

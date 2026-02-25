@@ -1,0 +1,27 @@
+services:
+  web:
+    build: .
+    container_name: chat_web
+    ports:
+      - "8001:8001"
+    env_file:
+      - .env
+    restart: unless-stopped
+    depends_on:
+      - redis
+
+  redis:
+    image: redis:7-alpine
+    container_name: chat_redis
+    restart: unless-stopped
+    command: redis-server --maxmemory 128mb --maxmemory-policy allkeys-lru
+
+  worker:
+    build: .
+    container_name: chat_worker
+    command: celery -A app.worker worker --loglevel=info --concurrency=1
+    env_file:
+      - .env
+    depends_on:
+      - redis
+    restart: unless-stopped
