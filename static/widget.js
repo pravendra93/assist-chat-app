@@ -20,7 +20,7 @@
     async function init() {
         try {
             const response = await fetch(`${apiBase}/config`, {
-                headers: { 'ASST-API-Key': apiKey }
+                headers: { 'ASST-API-KEY': apiKey }
             });
             if (!response.ok) throw new Error("Failed to load config");
             config = await response.json();
@@ -136,7 +136,7 @@
                         method: 'POST',
                         headers: {
                             'Content-Type': 'application/json',
-                            'ASST-API-Key': apiKey
+                            'ASST-API-KEY': apiKey
                         },
                         body: JSON.stringify({
                             message: text,

@@ -7,7 +7,7 @@ from app.core.security import verify_api_key
 from app.schema import TenantOut
 
 async def require_tenant_api_key(
-    asst_api_key: str = Header(..., alias="ASST-API-Key", description="The API Key"),
+    asst_api_key: str = Header(..., alias="ASST-API-KEY", description="The API Key"),
     db: AsyncSession = Depends(get_db)
 ) -> tuple[TenantOut, ApiKey]:
     """

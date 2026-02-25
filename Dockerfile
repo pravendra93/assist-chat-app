@@ -1,27 +1,51 @@
+# -------------------------------
+# Stage 1 — Builder
+# -------------------------------
+FROM python:3.11-slim AS builder
+
+ENV PYTHONDONTWRITEBYTECODE=1
+ENV PYTHONUNBUFFERED=1
+
+WORKDIR /install
+
+# Install system deps only for building
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential gcc \
+    && rm -rf /var/lib/apt/lists/*
+
+# Upgrade pip
+RUN pip install --upgrade pip
+
+# Copy requirements
+COPY requirements.txt .
+
+# Install into separate directory
+RUN pip install --prefix=/install/deps --no-cache-dir -r requirements.txt
+
+
+# -------------------------------
+# Stage 2 — Final Image
+# -------------------------------
 FROM python:3.11-slim
 
-# Create non-root user (FINDING-008)
+ENV PYTHONDONTWRITEBYTECODE=1
+ENV PYTHONUNBUFFERED=1
+
+# Create non-root user
 RUN groupadd -r appuser && useradd -r -g appuser appuser
 
 WORKDIR /code
 
-# Install system dependencies if needed (e.g. for some python packages)
-# RUN apt-get update && apt-get install -y gcc
+# Copy installed dependencies from builder
+COPY --from=builder /install/deps /usr/local
 
-# Copy requirements first to leverage Docker cache
-COPY ./requirements.txt /code/requirements.txt
-
-# Install dependencies
-RUN pip install --no-cache-dir --upgrade -r /code/requirements.txt
-
-# Copy the rest of the application with proper ownership
+# Copy application code
 COPY --chown=appuser:appuser ./app /code/app
 
-# Pre-create logs directory with proper ownership (Fix for PermissionError)
+# Create logs directory
 RUN mkdir -p /code/logs && chown appuser:appuser /code/logs
 
-# Switch to non-root user
 USER appuser
 
-# Command to run the application
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8001"]
+# Minimal workers for 1GB server
+CMD ["gunicorn", "app.main:app", "--workers", "2", "--worker-class", "uvicorn.workers.UvicornWorker", "--bind", "0.0.0.0:8001", "--timeout", "120", "--graceful-timeout", "30", "--keep-alive", "5" ]

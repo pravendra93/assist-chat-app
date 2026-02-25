@@ -11,9 +11,10 @@ services:
       - WATCHFILES_FORCE_POLLING=true # Helps with hot reload in some environments
     env_file:
       - .env
-    command: uvicorn app.main:app --host 0.0.0.0 --port 8001 --reload
+    # command: uvicorn app.main:app --host 0.0.0.0 --port 8001 --reload # Overridden by Dockerfile gunicorn for scaling
     # Health check for production readiness (FINDING-011)
     healthcheck:
+      # Use internal port 8001 for healthcheck
       test: [ "CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8001/health')" ]
       interval: 30s
       timeout: 10s
