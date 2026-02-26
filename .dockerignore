@@ -32,3 +32,5 @@ pytest.ini
 .pytest_cache
 .coverage
 htmlcov/
+.agent
+migrations/
