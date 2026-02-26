@@ -38,7 +38,7 @@ app.add_middleware(
     allow_origins=["*"],
     allow_credentials=False,
     allow_methods=["POST", "GET", "OPTIONS"],
-    allow_headers=["ASST-API-Key", "Content-Type", "Authorization"],
+    allow_headers=["ASST-API-KEY", "Content-Type", "Authorization"],
 )
 
 @app.middleware("http")

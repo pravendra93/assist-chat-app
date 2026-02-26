@@ -41,6 +41,7 @@ COPY --from=builder /install/deps /usr/local
 
 # Copy application code
 COPY --chown=appuser:appuser ./app /code/app
+COPY --chown=appuser:appuser ./static /code/static
 
 # Create logs directory
 RUN mkdir -p /code/logs && chown appuser:appuser /code/logs
