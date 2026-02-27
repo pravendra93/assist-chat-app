@@ -18,7 +18,7 @@ from app.db.models import (
     Tenant,
     ApiKey,
 )
-from app.core.llm import get_embedding, get_chat_completion
+from app.core.llm import get_embedding, get_chat_completion, get_chat_completion_stream
 from app.prompt.builder import PromptBuilder
 import uuid
 from typing import Optional, Tuple, Dict, Any, TYPE_CHECKING
@@ -244,6 +244,118 @@ class ChatService:
         db.add(event)
 
         await db.commit()
+
+
+    async def get_streaming_response(
+        self,
+        db: AsyncSession,
+        tenant: Tenant,
+        query: str,
+        session_id: Optional[str] = None,
+        plan_limits: Optional["PlanLimits"] = None,
+    ):
+        """
+        Streaming version of the RAG pipeline.
+        Yields tokens and handles background persistence.
+        """
+        from app.utils.redis_client import redis_client
+        import hashlib
+        import json
+
+        # Resolve plan-aware settings
+        if plan_limits is not None:
+            max_chunks = plan_limits.model_limits.max_chunks_per_query
+            max_tokens = plan_limits.model_limits.max_tokens_per_request
+            model = plan_limits.model_limits.default_model
+        else:
+            max_chunks = 5
+            max_tokens = 500
+            model = "gpt-4o-mini"
+
+        if not session_id:
+            session_id = str(uuid.uuid4())
+
+        # 1. Retrieve chunks
+        embedding = await get_embedding(query)
+        query_stmt = (
+            select(KnowledgeBaseChunk)
+            .join(
+                KnowledgeBaseEmbedding,
+                KnowledgeBaseChunk.id == KnowledgeBaseEmbedding.chunk_id,
+            )
+            .where(
+                KnowledgeBaseEmbedding.tenant_id == tenant.id,
+                KnowledgeBaseEmbedding.model == "text-embedding-3-small",
+            )
+            .order_by(
+                KnowledgeBaseEmbedding.embedding.cosine_distance(embedding)
+            )
+            .limit(max_chunks)
+        )
+        result = await db.execute(query_stmt)
+        chunks = result.scalars().all()
+        await db.close()
+
+        # 2. Build prompt
+        messages = self.prompt_builder.build(query, chunks)
+
+        # 3. Call Streaming LLM
+        stream = await get_chat_completion_stream(
+            messages,
+            model=model,
+            max_tokens=max_tokens,
+        )
+
+        full_answer = []
+        usage_data = None
+
+        async for chunk in stream:
+            if chunk.choices and chunk.choices[0].delta.content:
+                content = chunk.choices[0].delta.content
+                full_answer.append(content)
+                yield content
+            
+            if hasattr(chunk, 'usage') and chunk.usage:
+                usage_data = chunk.usage
+
+        # 4. Persistence & Cleanup (Post-stream)
+        answer_str = "".join(full_answer)
+        
+        # Calculate cost if usage_data is available
+        prompt_tokens = 0
+        completion_tokens = 0
+        total_tokens = 0
+        cost_usd = 0.0
+        
+        if usage_data:
+            prompt_tokens = usage_data.prompt_tokens
+            completion_tokens = usage_data.completion_tokens
+            total_tokens = usage_data.total_tokens
+            cost_usd = _calc_cost(model, prompt_tokens, completion_tokens)
+
+        persistence_data = {
+            "query": query,
+            "answer": answer_str,
+            "model": model,
+            "prompt_tokens": prompt_tokens,
+            "completion_tokens": completion_tokens,
+            "total_tokens": total_tokens,
+            "cost_usd": cost_usd,
+            "cached": False,
+        }
+
+        # Schedule background persistence
+        from app.tasks.background import persist_chat_response
+        persist_chat_response.delay(
+            tenant_id_str=str(tenant.id),
+            session_id=session_id,
+            data=persistence_data,
+        )
+
+        # Cache the result
+        query_hash = hashlib.md5(query.strip().lower().encode()).hexdigest()
+        cache_key = f"cache:chat:{tenant.id}:{query_hash}"
+        await redis_client.set_cache(cache_key, {"answer": answer_str}, ttl=86400)
 
 
 chat_service = ChatService()

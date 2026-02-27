@@ -1,4 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException, Response
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field, validator
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
@@ -23,6 +24,7 @@ router = APIRouter()
 class ChatRequest(BaseModel):
     query: str = Field(..., min_length=1, max_length=4000, description="User query")
     session_id: str | None = None
+    stream: bool = False
     
     @validator('query')
     def validate_query(cls, v):
@@ -72,6 +74,18 @@ async def chat(
     db: AsyncSession = Depends(get_db),
 ):
     tenant, api_key, plan_limits = tenant_data
+
+    if payload.stream:
+        return StreamingResponse(
+            chat_service.get_streaming_response(
+                db=db,
+                tenant=tenant,
+                query=payload.query,
+                session_id=payload.session_id,
+                plan_limits=plan_limits,
+            ),
+            media_type="text/plain",
+        )
 
     answer, session_id, persistence_data = await chat_service.get_response(
         db=db,
