@@ -45,3 +45,27 @@ async def get_chat_completion(
         return response
     except (APITimeoutError, asyncio.TimeoutError):
         raise HTTPException(status_code=504, detail="LLM request timed out")
+
+async def get_chat_completion_stream(
+    messages: list[dict],
+    model: str = "gpt-3.5-turbo",
+    temperature: float = 0.7,
+    max_tokens: int = 500
+):
+    """
+    Get a streaming chat completion from OpenAI.
+    """
+    try:
+        stream = await client.chat.completions.create(
+            model=model,
+            messages=messages,
+            temperature=temperature,
+            max_tokens=max_tokens,
+            stream=True,
+            stream_options={"include_usage": True}
+        )
+        return stream
+    except Exception as e:
+        from app.core.logging import logger
+        logger.error(f"LLM Stream Error: {e}")
+        raise HTTPException(status_code=500, detail="LLM streaming failed")
