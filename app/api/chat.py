@@ -39,7 +39,7 @@ class ChatRequest(BaseModel):
 class ChatResponse(BaseModel):
     answer: str
     confidence: float | None = None
-    session_id: str
+    session_id: str | None = None
 
 async def check_usage(
     tenant_data: Tuple[Tenant, ApiKey] = Depends(require_tenant_api_key),
@@ -103,7 +103,7 @@ async def chat(
     )
 
     # Expose cost to logging middleware
-    response.headers["X-Total-Cost"] = "{:.6f}".format(persistence_data["cost_usd"])
+    response.headers["X-Total-Cost"] = "{:.6f}".format(persistence_data.get("cost_usd", 0.0))
 
     return ChatResponse(
         answer=answer,

@@ -30,8 +30,7 @@ def persist_chat_response(tenant_id_str: str, session_id: str, data: Dict[str, A
             logger.error(f"Error persisting chat response for session {session_id}: {e}")
             raise e
         finally:
-            # CRITICAL: Dispose the engine pool after each task when using asyncio.run()
-            # to avoid "got Future attached to a different loop" errors on reuse.
-            await engine.dispose()
+            # NullPool will release the connection immediately on close within AsyncSessionLocal
+            pass
 
     asyncio.run(run_persistence())

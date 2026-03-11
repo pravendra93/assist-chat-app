@@ -77,12 +77,29 @@ class ChatService:
             max_tokens = 500
             model = "gpt-4o-mini"
 
-        # 1. Check Cache
-        query_hash = hashlib.md5(query.strip().lower().encode()).hexdigest()
-        cache_key = f"cache:chat:{tenant.id}:{query_hash}"
-
         if not session_id:
             session_id = str(uuid.uuid4())
+
+        # 0. Check Circuit Breaker
+        if await redis_client.is_circuit_broken():
+            from app.core.logging import logger
+            logger.warning(f"Circuit Breaker active for tenant {tenant.id}. Skipping LLM.")
+            fallback_answer = "Our AI service is temporarily unavailable due to capacity limits. Please try again later."
+            return fallback_answer, session_id, {
+                "query": query,
+                "answer": fallback_answer,
+                "model": model,
+                "prompt_tokens": 0,
+                "completion_tokens": 0,
+                "total_tokens": 0,
+                "cost_usd": 0.0,
+                "cached": False,
+                "error": "circuit_breaker_active"
+            }
+
+        # 1. Check Cache (Full Response)
+        query_hash = hashlib.md5(query.strip().lower().encode()).hexdigest()
+        cache_key = f"cache:chat:{tenant.id}:{query_hash}"
 
         cached_res = await redis_client.get_cache(cache_key)
         if cached_res:
@@ -99,71 +116,155 @@ class ChatService:
             return cached_res["answer"], session_id, persistence_data
 
         try:
+            from tenacity import retry, wait_exponential, stop_after_attempt, retry_if_exception, retry_if_exception_type
+            import openai
+
+            def is_retryable_openai_error(e):
+                """Predicate to skip retries for non-transient OpenAI errors."""
+                if isinstance(e, (openai.APIConnectionError, openai.APITimeoutError)):
+                    return True
+                if isinstance(e, openai.RateLimitError):
+                    # Do NOT retry if it's a quota issue
+                    return "insufficient_quota" not in str(e).lower()
+                if isinstance(e, openai.APIStatusError):
+                    # Retry on 500+ errors, but not on 400s (invalid_request, auth, etc)
+                    return e.status_code >= 500
+                return False
+
             # 2. Retrieve chunks (plan-limited)
-            embedding = await get_embedding(query)
+            try:
+                # 2a. Check Embedding Cache
+                emb_cache_key = f"cache:embedding:{query_hash}"
+                cached_emb_data = await redis_client.get_cache(emb_cache_key)
+                
+                if cached_emb_data and "embedding" in cached_emb_data:
+                    from app.core.logging import logger
+                    logger.info(f"Using cached embedding for query {query_hash}")
+                    embedding = cached_emb_data["embedding"]
+                else:
+                    @retry(
+                        wait=wait_exponential(multiplier=1, min=1, max=5),
+                        stop=stop_after_attempt(2),
+                        retry=retry_if_exception(is_retryable_openai_error)
+                    )
+                    async def fetch_embedding_with_retry():
+                        return await get_embedding(query)
+                    
+                    embedding = await fetch_embedding_with_retry()
+                    # Cache embedding for 7 days
+                    await redis_client.set_cache(emb_cache_key, {"embedding": embedding}, ttl=604800)
 
-            query_stmt = (
-                select(KnowledgeBaseChunk)
-                .join(
-                    KnowledgeBaseEmbedding,
-                    KnowledgeBaseChunk.id == KnowledgeBaseEmbedding.chunk_id,
+                query_stmt = (
+                    select(KnowledgeBaseChunk)
+                    .join(
+                        KnowledgeBaseEmbedding,
+                        KnowledgeBaseChunk.id == KnowledgeBaseEmbedding.chunk_id,
+                    )
+                    .where(
+                        KnowledgeBaseEmbedding.tenant_id == tenant.id,
+                        KnowledgeBaseEmbedding.model == "text-embedding-3-small",
+                    )
+                    .order_by(
+                        KnowledgeBaseEmbedding.embedding.cosine_distance(embedding)
+                    )
+                    .limit(max_chunks)   # ← plan-limited
                 )
-                .where(
-                    KnowledgeBaseEmbedding.tenant_id == tenant.id,
-                    KnowledgeBaseEmbedding.model == "text-embedding-3-small",
-                )
-                .order_by(
-                    KnowledgeBaseEmbedding.embedding.cosine_distance(embedding)
-                )
-                .limit(max_chunks)   # ← plan-limited
-            )
 
-            result = await db.execute(query_stmt)
-            chunks = result.scalars().all()
+                result = await db.execute(query_stmt)
+                chunks = result.scalars().all()
+            except Exception as e:
+                from app.core.logging import logger
+                logger.error(f"Retrieval Error for tenant {tenant.id}: {e}")
+                
+                # Check for quota error in retrieval (embeddings call)
+                if "insufficient_quota" in str(e).lower():
+                    await redis_client.set_str("cb:openai:quota_exceeded", "1", ttl=3600) # Break for 1 hour
+                
+                chunks = [] # Fallback to no context if DB fails
 
             # Early release: We've finished all DB reads for the RAG context.
             # Closing the session now returns the connection to the pool early
             # so it can be reused while we wait for the (relatively slow) LLM.
             await db.close()
 
+            # --- RETRIEVAL-FIRST FLOW ---
+            if not chunks:
+                from app.core.logging import logger
+                logger.info(f"No relevant context found for tenant {tenant.id}. Returning fallback.")
+                fallback_answer = "I'm sorry, I don't have enough information to answer that based on my knowledge base."
+                return fallback_answer, session_id, {
+                    "query": query,
+                    "answer": fallback_answer,
+                    "model": model,
+                    "prompt_tokens": 0,
+                    "completion_tokens": 0,
+                    "total_tokens": 0,
+                    "cost_usd": 0.0,
+                    "cached": False,
+                    "no_context": True
+                }
+
             # 3. Build prompt
             messages = self.prompt_builder.build(query, chunks)
 
             # 4. Call LLM (plan-limited model & max_tokens)
-            llm_completion = await get_chat_completion(
-                messages,
-                model=model,
-                max_tokens=max_tokens,
-            )
-            answer = llm_completion.choices[0].message.content
+            try:
+                @retry(
+                    wait=wait_exponential(multiplier=1, min=1, max=5),
+                    stop=stop_after_attempt(2),
+                    retry=retry_if_exception(is_retryable_openai_error)
+                )
+                async def fetch_completion_with_retry():
+                    return await get_chat_completion(
+                        messages,
+                        model=model,
+                        max_tokens=max_tokens,
+                    )
 
-            # 5. Calculate cost
-            prompt_tokens = llm_completion.usage.prompt_tokens
-            completion_tokens = llm_completion.usage.completion_tokens
-            total_tokens = llm_completion.usage.total_tokens
-            cost_usd = _calc_cost(model, prompt_tokens, completion_tokens)
+                llm_completion = await fetch_completion_with_retry()
+                answer = llm_completion.choices[0].message.content
 
-            persistence_data = {
-                "query": query,
-                "answer": answer,
-                "model": model,
-                "prompt_tokens": prompt_tokens,
-                "completion_tokens": completion_tokens,
-                "total_tokens": total_tokens,
-                "cost_usd": cost_usd,
-                "cached": False,
-            }
+                # 5. Calculate cost
+                prompt_tokens = llm_completion.usage.prompt_tokens
+                completion_tokens = llm_completion.usage.completion_tokens
+                total_tokens = llm_completion.usage.total_tokens
+                cost_usd = _calc_cost(model, prompt_tokens, completion_tokens)
 
-            # 6. Cache (24 h TTL)
-            await redis_client.set_cache(cache_key, {"answer": answer}, ttl=86400)
+                persistence_data = {
+                    "query": query,
+                    "answer": answer,
+                    "model": model,
+                    "prompt_tokens": prompt_tokens,
+                    "completion_tokens": completion_tokens,
+                    "total_tokens": total_tokens,
+                    "cost_usd": cost_usd,
+                    "cached": False,
+                }
 
-            return answer, session_id, persistence_data
+                # 6. Cache (24 h TTL)
+                await redis_client.set_cache(cache_key, {"answer": answer}, ttl=86400)
+
+                return answer, session_id, persistence_data
+
+            except Exception as e:
+                from app.core.logging import logger
+                logger.error(f"LLM Error for tenant {tenant.id}: {e}")
+                
+                # Check for quota error to trigger circuit breaker
+                if "insufficient_quota" in str(e).lower():
+                    await redis_client.set_str("cb:openai:quota_exceeded", "1", ttl=3600) # Break for 1 hour
+                
+                raise # Re-wrap in outer catch for fallback
 
         except Exception as e:
             from app.core.logging import logger
-            logger.error(f"ChatService Error for tenant {tenant.id}: {e}")
+            logger.error(f"ChatService Global Error for tenant {tenant.id}: {e}")
 
-            fallback_answer = "I'm having trouble thinking right now. Please try again."
+            if await redis_client.is_circuit_broken():
+                 fallback_answer = "Our AI service is temporarily unavailable due to capacity limits. Please try again later."
+            else:
+                 fallback_answer = "I'm having trouble thinking right now. Please try again."
+
             persistence_data = {
                 "query": query,
                 "answer": fallback_answer,
@@ -262,49 +363,101 @@ class ChatService:
         import hashlib
         import json
 
-        # Resolve plan-aware settings
-        if plan_limits is not None:
-            max_chunks = plan_limits.model_limits.max_chunks_per_query
-            max_tokens = plan_limits.model_limits.max_tokens_per_request
-            model = plan_limits.model_limits.default_model
-        else:
-            max_chunks = 5
-            max_tokens = 500
-            model = "gpt-4o-mini"
-
         if not session_id:
             session_id = str(uuid.uuid4())
 
+        # 0. Check Circuit Breaker
+        if await redis_client.is_circuit_broken():
+            from app.core.logging import logger
+            logger.warning(f"Circuit Breaker active for tenant {tenant.id}. Skipping Streaming LLM.")
+            yield "Our AI service is temporarily unavailable due to capacity limits. Please try again later."
+            return
+
         # 1. Retrieve chunks
-        embedding = await get_embedding(query)
-        query_stmt = (
-            select(KnowledgeBaseChunk)
-            .join(
-                KnowledgeBaseEmbedding,
-                KnowledgeBaseChunk.id == KnowledgeBaseEmbedding.chunk_id,
+        try:
+            from tenacity import retry, wait_exponential, stop_after_attempt, retry_if_exception
+            import openai
+
+            def is_retryable_openai_error(e):
+                """Predicate to skip retries for non-transient OpenAI errors."""
+                if isinstance(e, (openai.APIConnectionError, openai.APITimeoutError)):
+                    return True
+                if isinstance(e, openai.RateLimitError):
+                    return "insufficient_quota" not in str(e).lower()
+                if isinstance(e, openai.APIStatusError):
+                    return e.status_code >= 500
+                return False
+
+            query_hash = hashlib.md5(query.strip().lower().encode()).hexdigest()
+            emb_cache_key = f"cache:embedding:{query_hash}"
+            cached_emb_data = await redis_client.get_cache(emb_cache_key)
+
+            if cached_emb_data and "embedding" in cached_emb_data:
+                from app.core.logging import logger
+                logger.info(f"Using cached embedding for streaming query {query_hash}")
+                embedding = cached_emb_data["embedding"]
+            else:
+                @retry(
+                    wait=wait_exponential(multiplier=1, min=1, max=5),
+                    stop=stop_after_attempt(2),
+                    retry=retry_if_exception(is_retryable_openai_error)
+                )
+                async def fetch_embedding_with_retry():
+                    return await get_embedding(query)
+                
+                embedding = await fetch_embedding_with_retry()
+                await redis_client.set_cache(emb_cache_key, {"embedding": embedding}, ttl=604800)
+
+            query_stmt = (
+                select(KnowledgeBaseChunk)
+                .join(
+                    KnowledgeBaseEmbedding,
+                    KnowledgeBaseChunk.id == KnowledgeBaseEmbedding.chunk_id,
+                )
+                .where(
+                    KnowledgeBaseEmbedding.tenant_id == tenant.id,
+                    KnowledgeBaseEmbedding.model == "text-embedding-3-small",
+                )
+                .order_by(
+                    KnowledgeBaseEmbedding.embedding.cosine_distance(embedding)
+                )
+                .limit(max_chunks)
             )
-            .where(
-                KnowledgeBaseEmbedding.tenant_id == tenant.id,
-                KnowledgeBaseEmbedding.model == "text-embedding-3-small",
-            )
-            .order_by(
-                KnowledgeBaseEmbedding.embedding.cosine_distance(embedding)
-            )
-            .limit(max_chunks)
-        )
-        result = await db.execute(query_stmt)
-        chunks = result.scalars().all()
+            result = await db.execute(query_stmt)
+            chunks = result.scalars().all()
+        except Exception as e:
+            from app.core.logging import logger
+            logger.error(f"Streaming Retrieval Error for tenant {tenant.id}: {e}")
+            if "insufficient_quota" in str(e).lower():
+                await redis_client.set_str("cb:openai:quota_exceeded", "1", ttl=3600)
+            chunks = []
+            
         await db.close()
+
+        # --- RETRIEVAL-FIRST FLOW (Streaming) ---
+        if not chunks:
+            from app.core.logging import logger
+            logger.info(f"No context found for tenant {tenant.id} in streaming request. Returning fallback.")
+            yield "I'm sorry, I don't have enough information to answer that based on my knowledge base."
+            return
 
         # 2. Build prompt
         messages = self.prompt_builder.build(query, chunks)
 
         # 3. Call Streaming LLM
-        stream = await get_chat_completion_stream(
-            messages,
-            model=model,
-            max_tokens=max_tokens,
-        )
+        try:
+            stream = await get_chat_completion_stream(
+                messages,
+                model=model,
+                max_tokens=max_tokens,
+            )
+        except Exception as e:
+            from app.core.logging import logger
+            logger.error(f"Streaming LLM Error for tenant {tenant.id}: {e}")
+            if "insufficient_quota" in str(e).lower():
+                await redis_client.set_str("cb:openai:quota_exceeded", "1", ttl=3600)
+            yield "I'm having trouble thinking right now. Please try again."
+            return
 
         full_answer = []
         usage_data = None

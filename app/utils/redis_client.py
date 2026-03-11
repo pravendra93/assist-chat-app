@@ -65,6 +65,36 @@ class RedisClient:
                 logger.error(f"Error getting Redis cache for key {key}: {e}")
         return None
 
+    async def set_str(self, key: str, value: str, ttl: Optional[int] = None):
+        """
+        Store a raw string in Redis with an optional TTL.
+        """
+        client = await self.get_client()
+        if client:
+            try:
+                await client.set(key, value, ex=ttl)
+            except Exception as e:
+                logger.error(f"Error setting Redis string for key {key}: {e}")
+
+    async def get_str(self, key: str) -> Optional[str]:
+        """
+        Retrieve a raw string from Redis.
+        """
+        client = await self.get_client()
+        if client:
+            try:
+                return await client.get(key)
+            except Exception as e:
+                logger.error(f"Error getting Redis string for key {key}: {e}")
+        return None
+
+    async def is_circuit_broken(self, key: str = "cb:openai:quota_exceeded") -> bool:
+        """
+        Check if the circuit breaker is set.
+        """
+        val = await self.get_str(key)
+        return val == "1"
+
     async def delete_by_pattern(self, pattern: str):
         """
         Delete all keys matching the given pattern.

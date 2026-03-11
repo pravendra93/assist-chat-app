@@ -14,9 +14,15 @@ if DATABASE_URL.startswith("postgresql://"):
     DATABASE_URL = DATABASE_URL.replace(
         "postgresql://", "postgresql+asyncpg://", 1)
 
-# create async engine (tune pool_size / max_overflow if necessary)
+from sqlalchemy.pool import NullPool
+
+# create async engine (using NullPool for Supabase Session mode)
 engine = create_async_engine(
-    DATABASE_URL, future=True, echo=False, pool_size=20, max_overflow=10)
+    DATABASE_URL, 
+    future=True, 
+    echo=False,
+    poolclass=NullPool
+)
 
 AsyncSessionLocal = sessionmaker(
     engine, class_=AsyncSession, expire_on_commit=False)

@@ -6,7 +6,7 @@ import asyncio
 client = AsyncOpenAI(
     api_key=settings.OPENAI_API_KEY,
     timeout=30.0,  # 30 second timeout (FINDING-006)
-    max_retries=2
+    max_retries=0   # Disable automatic retries to handle circuit breaker and specific errors manually
 )
 
 async def get_embedding(text: str, model: str = "text-embedding-3-small") -> list[float]:
