@@ -51,10 +51,14 @@ class Tenant(Base):
                            server_default=func.now())
     trial_ends_at = sa.Column(sa.DateTime(timezone=True), nullable=True)
     is_trial = sa.Column(sa.Boolean, default=True)
+    first_api_call_at = sa.Column(sa.DateTime(timezone=True), nullable=True)
+    installation_url = sa.Column(sa.String, nullable=True)
+    is_installed = sa.Column(sa.Boolean, default=False, server_default=sa.sql.expression.false())
 
 
     # relationships
     plan_rel = relationship("Plan")
+    api_keys = relationship("ApiKey", backref="tenant", cascade="all, delete-orphan")
 
     @property
     def plan(self):
@@ -65,33 +69,40 @@ class TenantConfig(Base):
     __tablename__ = "tenant_configs"
     id = sa.Column(postgresql.UUID(as_uuid=True),
                    primary_key=True, default=gen_uuid)
-    tenant_id = sa.Column(postgresql.UUID(as_uuid=True),
-                          sa.ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False)
-    domain = sa.Column(sa.String, nullable=True)
+    tenant_id = sa.Column(postgresql.UUID(as_uuid=True), sa.ForeignKey(
+        "tenants.id"), nullable=False, index=True)
+    domain = sa.Column(sa.String, nullable=True)  # NULL = default config
     brand_name = sa.Column(sa.String, nullable=True)
-    primary_color = sa.Column(sa.String, server_default='#0ea5e9')
+    primary_color = sa.Column(sa.String, nullable=True,
+                              server_default="#0ea5e9")
     logo_url = sa.Column(sa.String, nullable=True)
-    welcome_message = sa.Column(sa.String, server_default='Hello! How can I help you?')
-    chat_icon = sa.Column(sa.String, server_default='message')
+    welcome_message = sa.Column(
+        sa.String, nullable=True, server_default="Hello! How can I help you?")
+    chat_icon = sa.Column(sa.String, nullable=True, server_default="message")
     created_at = sa.Column(sa.DateTime(timezone=True),
                            server_default=func.now())
     updated_at = sa.Column(sa.DateTime(timezone=True),
-                           server_default=func.now(), onupdate=func.now())
+                           server_default=func.now())
 
 
 class ChatbotConfig(Base):
     __tablename__ = "chatbot_configs"
+    
     id = sa.Column(postgresql.UUID(as_uuid=True),
                    primary_key=True, default=gen_uuid)
-    tenant_id = sa.Column(postgresql.UUID(as_uuid=True),
-                          sa.ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False, unique=True)
-    name = sa.Column(sa.String, nullable=False, server_default='Support Assistant')
-    welcome_message = sa.Column(sa.String, server_default='Hi! How can I help you today?')
-    is_active = sa.Column(sa.Boolean, nullable=False, server_default=sa.sql.expression.true())
-    primary_color = sa.Column(sa.String, server_default='#000000')
-    background_color = sa.Column(sa.String, server_default='#ffffff')
+    tenant_id = sa.Column(postgresql.UUID(as_uuid=True), sa.ForeignKey(
+        "tenants.id"), nullable=False, unique=True, index=True)
+    
+    name = sa.Column(sa.String, nullable=False, default='Support Assistant')
+    welcome_message = sa.Column(sa.String, nullable=True, default='Hi! How can I help you today?')
+    is_active = sa.Column(sa.Boolean, nullable=False, default=True)
+    
+    primary_color = sa.Column(sa.String, nullable=True, default='#47d751')
+    background_color = sa.Column(sa.String, nullable=True, default='#ffffff')
     logo_url = sa.Column(sa.String, nullable=True)
-    position = sa.Column(sa.String, server_default='bottom-right')
+    
+    position = sa.Column(sa.String, nullable=True, default='bottom-right')
+    
     created_at = sa.Column(sa.DateTime(timezone=True),
                            server_default=func.now())
     updated_at = sa.Column(sa.DateTime(timezone=True),
@@ -126,8 +137,22 @@ class TenantSubscription(Base):
     started_at = sa.Column(sa.DateTime(timezone=True), nullable=True)
     expires_at = sa.Column(sa.DateTime(timezone=True), nullable=True)
     provider_subscription_id = sa.Column(sa.String, nullable=True)
-    created_at = sa.Column(sa.DateTime(timezone=True),
-                           server_default=func.now())
+    
+    # Razorpay subscription specific fields
+    razorpay_subscription_id = sa.Column(sa.String, nullable=True)
+    razorpay_payment_id = sa.Column(sa.String, nullable=True)
+    razorpay_plan_id = sa.Column(sa.String, nullable=True)
+    plan_id = sa.Column(postgresql.UUID(as_uuid=True), sa.ForeignKey("plans.id"), nullable=True)
+    current_period_start = sa.Column(sa.DateTime(timezone=True), nullable=True)
+    current_period_end = sa.Column(sa.DateTime(timezone=True), nullable=True)
+    cancel_at_period_end = sa.Column(sa.Boolean, default=False)
+    cancelled_at = sa.Column(sa.DateTime(timezone=True), nullable=True)
+    
+    # relationships
+    plan_rel = relationship("Plan")
+    
+    created_at = sa.Column(sa.DateTime(timezone=True), server_default=func.now())
+    updated_at = sa.Column(sa.DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
 
 class EmailToken(Base):
@@ -241,6 +266,8 @@ class Plan(Base):
     meta = sa.Column("metadata", postgresql.JSONB,
                      nullable=False, server_default='{}')
 
+    razorpay_plan_id = sa.Column(sa.String, nullable=True)
+
     active = sa.Column(sa.Boolean, nullable=False, default=True)
 
     created_at = sa.Column(sa.DateTime(timezone=True),
@@ -341,8 +368,8 @@ class ApiKey(Base):
     
     # Secure storage
     api_key_hash = sa.Column(sa.String, nullable=False, unique=True, index=True)
-    # Store prefix to identify keys in UI and for efficient lookup (e.g. sk_live_1234...)
-    key_prefix = sa.Column(sa.String, nullable=True, index=True)  # Indexed for fast lookup
+    # Store prefix to identify keys in UI (e.g. sk_live_1234...)
+    key_prefix = sa.Column(sa.String, nullable=True) 
     
     is_active = sa.Column(sa.Boolean, default=True)
     
