@@ -170,3 +170,48 @@ def test_require_tenant_api_key_direct_www_stripping(mocker):
     
     assert result_tenant.id == tenant_id
     assert result_api_key.id == api_key.id
+
+def test_require_tenant_api_key_portal_bypass(mocker):
+    tenant_id = uuid.uuid4()
+    tenant = create_mock_tenant(tenant_id)
+    api_key = create_mock_api_key(tenant_id)
+    
+    mocker.patch("app.auth.api_key.verify_api_key", return_value=True)
+    mocker.patch("app.auth.api_key.func.now", return_value=None)
+    
+    # Test cases for different portal domains
+    portal_origins = [
+        "http://localhost:3000",
+        "https://stage.assistra.app/",
+        "https://assistra.app",
+        "https://www.assistra.app"
+    ]
+    
+    for origin in portal_origins:
+        # Mock DB - only 2 calls expected (API Key and Tenant)
+        # The 3rd call (TenantConfig) should be bypassed
+        mock_db = AsyncMock()
+        mock_result_api = MagicMock()
+        mock_result_api.scalars.return_value.all.return_value = [api_key]
+        mock_result_tenant = MagicMock()
+        mock_result_tenant.scalars.return_value.first.return_value = tenant
+        
+        mock_db.execute.side_effect = [mock_result_api, mock_result_tenant]
+        
+        # Mock Request
+        mock_request = MagicMock(spec=Request)
+        mock_request.headers = {"origin": origin}
+        
+        async def run():
+            return await require_tenant_api_key(
+                request=mock_request,
+                asst_api_key="sk_live_123456789012",
+                db=mock_db
+            )
+        
+        result_tenant, result_api_key = anyio.run(run)
+        
+        assert result_tenant.id == tenant_id
+        assert result_api_key.id == api_key.id
+        # Ensure only 2 DB calls were made (bypassing TenantConfig fetch)
+        assert mock_db.execute.call_count == 2

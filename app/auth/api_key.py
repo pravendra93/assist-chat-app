@@ -6,6 +6,7 @@ from app.db.models import ApiKey, Tenant, TenantConfig
 from app.core.security import verify_api_key
 from urllib.parse import urlparse
 from app.schema import TenantOut
+from app.core.config import settings
 
 async def require_tenant_api_key(
     request: Request,
@@ -63,53 +64,68 @@ async def require_tenant_api_key(
 
     # --- Domain Validation ---
     request_origin = request.headers.get("origin") or request.headers.get("referer")
+    
+    # Internal portal domains that bypass tenant-specific domain validation
+    PORTAL_DOMAINS = settings.PORTAL_DOMAINS
+    
     request_domain = None
+    is_portal_request = False
+    
     if request_origin:
         parsed = urlparse(request_origin)
+        # Check if the request is coming from one of our portal domains
+        netloc = (parsed.netloc or parsed.path).lower()
+        if netloc.startswith("www."):
+            netloc = netloc[4:]
+        
+        if netloc in PORTAL_DOMAINS:
+            is_portal_request = True
+            
+        # Extract hostname for tenant-specific configuration matching
         request_domain = parsed.hostname or request_origin
-        # Strip 'www.' if present for more flexible matching
         if request_domain.startswith("www."):
             request_domain = request_domain[4:]
     
-    
-    # Fetch configured domains for this tenant
-    config_result = await db.execute(
-        select(TenantConfig).where(
-            TenantConfig.tenant_id == tenant.id,
-            TenantConfig.domain != None
+    # If it's a request from our portal, we skip the dynamic domain validation
+    if not is_portal_request:
+        # Fetch configured domains for this tenant
+        config_result = await db.execute(
+            select(TenantConfig).where(
+                TenantConfig.tenant_id == tenant.id,
+                TenantConfig.domain != None
+            )
         )
-    )
-    tenant_configs = config_result.scalars().all()
-    configured_domains = [tc.domain.lower() for tc in tenant_configs if tc.domain]
-    
-    # Normalize configured domains (strip 'www.' if present)
-    normalized_configured_domains = []
-    for d in configured_domains:
-        d_parsed = urlparse(d if "://" in d else f"https://{d}")
-        d_hostname = d_parsed.hostname or d
-        if d_hostname.startswith("www."):
-            d_hostname = d_hostname[4:]
-        normalized_configured_domains.append(d_hostname)
-    
-    # If no domains are configured, the user specified "allow request only to those ... which has domain"
-    if not normalized_configured_domains:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Authentication failed"
-        )
+        tenant_configs = config_result.scalars().all()
+        configured_domains = [tc.domain.lower() for tc in tenant_configs if tc.domain]
+        
+        # Normalize configured domains (strip 'www.' if present)
+        normalized_configured_domains = []
+        for d in configured_domains:
+            d_parsed = urlparse(d if "://" in d else f"https://{d}")
+            d_hostname = d_parsed.hostname or d
+            if d_hostname.startswith("www."):
+                d_hostname = d_hostname[4:]
+            normalized_configured_domains.append(d_hostname)
+        
+        # If no domains are configured, the user specified "allow request only to those ... which has domain"
+        if not normalized_configured_domains:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Authentication failed"
+            )
 
-    # Check for match (case-insensitive)
-    is_domain_allowed = False
-    if request_domain:
-        request_domain = request_domain.lower()
-        if request_domain in normalized_configured_domains:
-            is_domain_allowed = True
-            
-    if not is_domain_allowed:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Authentication failed"
-        )
+        # Check for match (case-insensitive)
+        is_domain_allowed = False
+        if request_domain:
+            request_domain = request_domain.lower()
+            if request_domain in normalized_configured_domains:
+                is_domain_allowed = True
+                
+        if not is_domain_allowed:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Authentication failed"
+            )
     # --- End Domain Validation ---
 
     # Tracking Logic
