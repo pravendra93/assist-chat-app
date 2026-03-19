@@ -30,6 +30,10 @@ class AccountOut(BaseModel):
     last_name: Optional[str] = None
     is_active: bool
     role: Optional[str] = None
+    tenant_id: Optional[UUID] = None
+    is_subscribed: bool = False
+    plan_name: Optional[str] = None
+    plan_slug: Optional[str] = None
     created_at: Optional[datetime] = None
 
     class Config:
@@ -147,13 +151,16 @@ class CouponUsageOut(BaseModel):
 
 class TenantCreate(BaseModel):
     name: str
-    domain: str
+    domain: Optional[str] = None
     owner_account_id: Optional[UUID] = None
     status: Optional[str] = "pending"  # allowed: pending, active, suspended
-    plan: Optional[str] = "trial"
+    plan: Optional[str] = None
     plan_id: Optional[UUID] = None
     trial_ends_at: Optional[datetime] = None
     is_trial: Optional[bool] = True
+    first_api_call_at: Optional[datetime] = None
+    installation_url: Optional[str] = None
+    is_installed: Optional[bool] = False
 
 
 
@@ -167,6 +174,9 @@ class TenantOut(BaseModel):
     plan_id: Optional[UUID] = None
     trial_ends_at: Optional[datetime] = None
     is_trial: bool = True
+    first_api_call_at: Optional[datetime] = None
+    installation_url: Optional[str] = None
+    is_installed: bool = False
     created_at: Optional[datetime] = None
 
     updated_at: Optional[datetime] = None
@@ -177,13 +187,15 @@ class TenantOut(BaseModel):
 
 class TenantUpdate(BaseModel):
     name: Optional[str] = None
-    domain: str
+    domain: Optional[str] = None
     owner_account_id: Optional[UUID] = None
     status: Optional[str] = None
-    plan: Optional[str] = None
     plan_id: Optional[UUID] = None
     trial_ends_at: Optional[datetime] = None
     is_trial: Optional[bool] = None
+    first_api_call_at: Optional[datetime] = None
+    installation_url: Optional[str] = None
+    is_installed: Optional[bool] = None
 
 
     class Config:
@@ -263,6 +275,7 @@ class PlanOut(BaseModel):
     features: Optional[Dict[str, Any]] = {}
     meta: Optional[Dict[str, Any]] = {}
     active: bool
+    razorpay_plan_id: Optional[str] = None
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
     # prices: List[PlanPriceOut] = []
@@ -284,6 +297,7 @@ class PlanUpdate(BaseModel):
     stripe_price_id: Optional[str] = None
     features: Optional[Dict[str, Any]] = None
     metadata: Optional[Dict[str, Any]] = None
+    razorpay_plan_id: Optional[str] = None
     active: Optional[bool] = None
 
     class Config:
@@ -303,6 +317,7 @@ class PublicPlanOut(BaseModel):
     trial_days: int
     features: Optional[Dict[str, Any]] = {}
     active: bool
+    razorpay_plan_id: Optional[str] = None
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
 
@@ -318,10 +333,10 @@ class LogEntry(BaseModel):
 class ChatbotConfigOut(BaseModel):
     id: UUID
     tenant_id: UUID
-    name: str = "Support Assistant"
+    name: str = "Assistra"
     welcome_message: Optional[str] = "Hi! How can I help you today?"
     is_active: bool = True
-    primary_color: Optional[str] = "#000000"
+    primary_color: Optional[str] = "#47d751"
     background_color: Optional[str] = "#ffffff"
     logo_url: Optional[str] = None
     position: Optional[str] = "bottom-right"
@@ -462,3 +477,40 @@ class TenantLimitsOverrideOut(TenantLimitsOverrideBase):
 
 
 
+
+class TenantSettingsOut(BaseModel):
+    name: str  # Plan name
+    features: Dict[str, Any]
+
+    class Config:
+        from_attributes = True
+
+
+class ForgotPasswordIn(BaseModel):
+    email: EmailStr
+
+
+class ResetPasswordIn(BaseModel):
+    token: str
+    new_password: str
+
+class TenantSubscriptionOut(BaseModel):
+    id: UUID
+    tenant_id: UUID
+    plan: Optional[str] = None
+    status: Optional[str] = None
+    started_at: Optional[datetime] = None
+    expires_at: Optional[datetime] = None
+    plan_id: Optional[UUID] = None
+    current_period_start: Optional[datetime] = None
+    current_period_end: Optional[datetime] = None
+    cancel_at_period_end: bool = False
+    cancelled_at: Optional[datetime] = None
+    created_at: datetime
+    updated_at: datetime
+
+    # Optional fields for joined data
+    tenant_name: Optional[str] = None
+
+    class Config:
+        orm_mode = True

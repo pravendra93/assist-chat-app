@@ -39,8 +39,33 @@ Each agent is customizable via the `ChatbotConfig` and `TenantConfig` models:
 - **Cost Tracking**: Each interaction tracks token usage (prompt/completion) and USD cost.
 - **Caching**: 24-hour Redis TTL for identical queries to minimize LLM costs and latency.
 
+## Development & Docker Environment
+
+The application is containerized using Docker for consistent development and deployment environments.
+
+### 1. Docker Services
+- **`web`**: The main FastAPI application serving the RAG API and widget.
+  - **Port**: Accessible on `8001`.
+  - **Runtime**: Uses `gunicorn` with `uvicorn` workers in production/final images.
+  - **Hot-Reload**: Local `app/`, `tests/`, and `static/` directories are volume-mounted to allow real-time code changes.
+- **`redis`**: Used for 24-hour result caching and as a broker for Celery tasks.
+- **`worker`**: A Celery worker instance that handles background tasks like persisting chat responses to the database.
+
+### 2. Running the Application
+To start the entire stack:
+```bash
+docker-compose up --build
+```
+
+### 3. Running Tests
+Tests are located in the `tests/` directory and should be executed within the `web` container to ensure all environment variables and dependencies are present:
+```bash
+docker-compose exec web pytest
+```
+
 ## Key Files
 - `app/services/chat_service.py`: Core RAG orchestration logic.
 - `app/prompt/builder.py`: System prompt construction and sanitization.
 - `app/core/llm.py`: OpenAI API integration.
 - `app/db/models.py`: Database schemas for `ChatbotConfig` and `Tenant`.
+- `migrations`: Alembic migrations for database schema changes.

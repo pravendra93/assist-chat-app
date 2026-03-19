@@ -2,7 +2,7 @@ import time
 import uuid
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.staticfiles import StaticFiles
+# from fastapi.staticfiles import StaticFiles
 from contextlib import asynccontextmanager
 from app.api.chat import router as chat_router
 from app.api.widget import router as widget_router
@@ -81,7 +81,7 @@ async def log_requests(request: Request, call_next):
             raise
 
 # Static Files (for Widget script)
-app.mount("/static", StaticFiles(directory="static"), name="static")
+# app.mount("/static", StaticFiles(directory="static"), name="static")
 
 # Routes
 app.include_router(chat_router, prefix="/v1/chat")

@@ -153,6 +153,7 @@ def test_plan_limits_applied_to_chat(mock_get_limits, mock_embedding, mock_compl
     
     # Bypass redis
     mock_redis.get_cache.return_value = None
+    mock_redis.is_circuit_broken.return_value = False
     
     # Mock DB for throttler (pass all checks)
     mock_session = AsyncMock()
