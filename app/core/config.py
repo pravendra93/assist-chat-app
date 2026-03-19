@@ -62,6 +62,17 @@ class Settings(BaseSettings):
     # Redis
     REDIS_URL: str = os.getenv("REDIS_URL", "redis://localhost:6379/0")
 
+    # Portal Domains for Bypass
+    PORTAL_DOMAINS: List[str] = os.getenv("PORTAL_DOMAINS", "localhost:3000,stage.assistra.app,assistra.app")
+
+    @validator("PORTAL_DOMAINS", pre=True)
+    def assemble_portal_domains(cls, v: Union[str, List[str]]) -> List[str]:
+        if isinstance(v, str) and not v.startswith("["):
+            return [i.strip() for i in v.split(",")]
+        elif isinstance(v, (list, str)):
+            return v
+        return []
+
     # Internal Security
     INTERNAL_CACHE_HEADER: Optional[str] = os.getenv("INTERNAL_CACHE_HEADER")
 
