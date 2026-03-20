@@ -17,14 +17,6 @@ setup_logging()
 async def lifespan(app: FastAPI):
     # Startup logic
     await redis_client.connect()
-    
-    # Initialize Rate Limiting (FINDING-005)
-    from fastapi_limiter import FastAPILimiter
-    r_client = await redis_client.get_client()
-    if r_client:
-        await FastAPILimiter.init(r_client)
-        logger.info("Application startup: FastAPILimiter initialized")
-    
     logger.info("Application startup: Redis connected")
     yield
     # Shutdown logic
