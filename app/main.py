@@ -7,7 +7,6 @@ from contextlib import asynccontextmanager
 from app.api.chat import router as chat_router
 from app.api.widget import router as widget_router
 from app.api.internal import router as internal_router
-from app.core.config import settings
 from app.core.logging import setup_logging, logger
 from app.utils.redis_client import redis_client
 
@@ -18,6 +17,14 @@ setup_logging()
 async def lifespan(app: FastAPI):
     # Startup logic
     await redis_client.connect()
+    
+    # Initialize Rate Limiting (FINDING-005)
+    from fastapi_limiter import FastAPILimiter
+    r_client = await redis_client.get_client()
+    if r_client:
+        await FastAPILimiter.init(r_client)
+        logger.info("Application startup: FastAPILimiter initialized")
+    
     logger.info("Application startup: Redis connected")
     yield
     # Shutdown logic

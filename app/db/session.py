@@ -17,11 +17,13 @@ if DATABASE_URL.startswith("postgresql://"):
 from sqlalchemy.pool import NullPool
 
 # create async engine (using NullPool for Supabase Session mode)
+# sslmode=require is enforced to prevent MitM attacks
 engine = create_async_engine(
     DATABASE_URL, 
     future=True, 
     echo=False,
-    poolclass=NullPool
+    poolclass=NullPool,
+    connect_args={"ssl": "require"}
 )
 
 AsyncSessionLocal = sessionmaker(
