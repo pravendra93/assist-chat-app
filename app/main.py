@@ -7,7 +7,6 @@ from contextlib import asynccontextmanager
 from app.api.chat import router as chat_router
 from app.api.widget import router as widget_router
 from app.api.internal import router as internal_router
-from app.core.config import settings
 from app.core.logging import setup_logging, logger
 from app.utils.redis_client import redis_client
 

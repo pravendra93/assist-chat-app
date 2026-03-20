@@ -88,6 +88,28 @@ async def require_tenant_api_key(
     
     # If it's a request from our portal, we skip the dynamic domain validation
     if not is_portal_request:
+        # DETECT NON-BROWSER CLIENTS (Mitigation for FINDING-002)
+        # Since the API key for the widget is public, any non-browser client 
+        # (scripts/curl) can use it by spoofing the Origin header.
+        # We add a basic check for common browser strings in the User-Agent.
+        user_agent = request.headers.get("user-agent", "").lower()
+        is_likely_browser = any(b in user_agent for b in ["mozilla", "chrome", "safari", "firefox", "edge"])
+        
+        # If the request domain is provided but isn't from a browser, 
+        # it's a higher risk of intent to bypass whitelisting.
+        # Note: Some real users might use obscure browsers, so we log but allow for now,
+        # or we could be more strict if abuse is detected.
+        if not is_likely_browser:
+             from app.core.logging import logger
+             logger.warning(
+                 "potential_origin_spoofing",
+                 tenant_id=str(tenant.id),
+                 user_agent=user_agent,
+                 origin=request_origin
+             )
+             # In a production environment with high abuse, we might block this:
+             # raise HTTPException(status_code=403, detail="Access denied for non-browser clients")
+
         # Fetch configured domains for this tenant
         config_result = await db.execute(
             select(TenantConfig).where(
@@ -137,7 +159,7 @@ async def require_tenant_api_key(
         tenant.is_installed = True
         tenant.first_api_call_at = func.now()
         # Capture the URL where the API/Widget was first called
-        tenant.installation_url = request.headers.get("origin") or request.headers.get("referer")
+        tenant.installation_url = request_origin
     
     # Use flush so the updates are sent to the DB but not committed yet.
     # The route handler (which uses this dependency) will handle the commit.
