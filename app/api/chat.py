@@ -41,6 +41,8 @@ class ChatResponse(BaseModel):
     confidence: float | None = None
     session_id: str | None = None
 
+from app.services.credit_service import has_sufficient_credits
+
 async def check_usage(
     tenant_data: Tuple[Tenant, ApiKey] = Depends(require_tenant_api_key),
     db: AsyncSession = Depends(get_db),
@@ -49,7 +51,8 @@ async def check_usage(
     Dependency that:
     1. Loads plan limits from Plan.features for this tenant
     2. Enforces trial expiry, daily/monthly spend, and daily request limits
-    3. Returns (tenant, api_key, plan_limits) for downstream use
+    3. Enforces credit limits
+    4. Returns (tenant, api_key, plan_limits) for downstream use
     """
     tenant, api_key = tenant_data
 
@@ -58,6 +61,17 @@ async def check_usage(
 
     # Enforce all plan-level gates
     await enforce_plan_limits(tenant, plan_limits, db)
+
+    # Enforce credit limits
+    sufficient = await has_sufficient_credits(db, tenant.id)
+    if not sufficient:
+        raise HTTPException(
+            status_code=402,
+            detail={
+                "code": "credits_exhausted",
+                "message": "You have run out of credits. Please upgrade your plan to continue.",
+            },
+        )
 
     return tenant, api_key, plan_limits
 

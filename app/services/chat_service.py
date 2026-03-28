@@ -344,6 +344,22 @@ class ChatService:
         )
         db.add(event)
 
+        # 5. Deduct Credits
+        try:
+            from app.services.credit_service import charge_credits
+            await charge_credits(
+                db=db,
+                tenant_id=tenant_id,
+                prompt_tokens=data.get("prompt_tokens", 0),
+                completion_tokens=data.get("completion_tokens", 0),
+                conversation_id=conversation.id,
+                request_type="chat",
+                model=data.get("model", "gpt-4o-mini")
+            )
+        except Exception as e:
+            from app.core.logging import logger
+            logger.error(f"Failed to charge credits for tenant {tenant_id}: {e}", exc_info=True)
+
         await db.commit()
 
 
