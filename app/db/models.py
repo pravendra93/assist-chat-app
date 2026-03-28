@@ -462,3 +462,61 @@ class LLMUsage(Base):
 
     created_at = sa.Column(sa.DateTime(timezone=True),
                            server_default=func.now())
+
+
+class CreditLedger(Base):
+    """
+    Tracks credit allocations (purchased/granted) per tenant.
+    credits_used is incremented atomically as each request is charged.
+    """
+    __tablename__ = "credit_ledger"
+
+    id = sa.Column(postgresql.UUID(as_uuid=True), primary_key=True, default=gen_uuid)
+    tenant_id = sa.Column(postgresql.UUID(as_uuid=True), sa.ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False, index=True)
+
+    credits_total = sa.Column(sa.Integer, nullable=False, default=0)
+    credits_used  = sa.Column(sa.Integer, nullable=False, default=0)
+
+    # source: 'plan', 'top_up', 'promo', 'admin'
+    source      = sa.Column(sa.String, nullable=False, default="plan")
+    description = sa.Column(sa.Text, nullable=True)
+
+    valid_from = sa.Column(sa.DateTime(timezone=True), server_default=func.now(), nullable=False)
+    valid_to   = sa.Column(sa.DateTime(timezone=True), nullable=True)  # NULL = never expires
+
+    created_at = sa.Column(sa.DateTime(timezone=True), server_default=func.now())
+    updated_at = sa.Column(sa.DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+    # relationship
+    usage_logs = relationship("CreditUsageLog", back_populates="ledger", cascade="all, delete-orphan")
+
+
+class CreditUsageLog(Base):
+    """
+    Per-request credit deduction records.
+    One row per charged API call (chat or embedding).
+    """
+    __tablename__ = "credit_usage_log"
+
+    id = sa.Column(postgresql.UUID(as_uuid=True), primary_key=True, default=gen_uuid)
+    tenant_id = sa.Column(postgresql.UUID(as_uuid=True), sa.ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False, index=True)
+    ledger_id = sa.Column(postgresql.UUID(as_uuid=True), sa.ForeignKey("credit_ledger.id", ondelete="SET NULL"), nullable=True)
+    conversation_id = sa.Column(postgresql.UUID(as_uuid=True), sa.ForeignKey("conversations.id", ondelete="SET NULL"), nullable=True)
+
+    # request_type: 'chat', 'embedding', 'search'
+    request_type = sa.Column(sa.String, nullable=False, default="chat")
+
+    prompt_tokens     = sa.Column(sa.Integer, nullable=False, default=0)
+    completion_tokens = sa.Column(sa.Integer, nullable=False, default=0)
+    total_tokens      = sa.Column(sa.Integer, nullable=False, default=0)
+    credits_charged   = sa.Column(sa.Integer, nullable=False, default=0)
+    model             = sa.Column(sa.String, nullable=True)
+
+    # status: 'charged', 'refunded', 'failed'
+    status = sa.Column(sa.String, nullable=False, default="charged")
+
+    created_at = sa.Column(sa.DateTime(timezone=True), server_default=func.now(), index=True)
+
+    # relationship back to ledger
+    ledger = relationship("CreditLedger", back_populates="usage_logs")
+
