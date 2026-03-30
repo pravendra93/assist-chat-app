@@ -1,23 +1,20 @@
 """
 app/usage/throttler.py
 
-Plan-aware request enforcement.
-Checks trial expiry, daily/monthly spend limits, and daily request counts
-sourced from Plan.features (via PlanLimits) before allowing a chat call.
+Usage enforcement.
+Checks trial expiry and credit balance before allowing a chat call.
 """
 
 from fastapi import HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import text
-from datetime import datetime, timezone, date
+from datetime import datetime, timezone
 from typing import TYPE_CHECKING
+
+from app.services.credit_service import has_sufficient_credits
 
 if TYPE_CHECKING:
     from app.db.models import Tenant
     from app.core.plan_limits import PlanLimits
-
-# Safety buffer so we block just before the hard limit
-COST_BUFFER_USD = 0.20
 
 
 async def enforce_plan_limits(
@@ -26,10 +23,11 @@ async def enforce_plan_limits(
     db: AsyncSession,
 ) -> None:
     """
-    Gate-check all plan-level limits before serving a chat request.
+    Gate-check usage limits before serving a chat request.
 
-    Raises HTTP 403 for trial expiry.
-    Raises HTTP 429 for spend / request-count overruns.
+    Checks:
+    1. Trial expiry: Raises HTTP 403
+    2. Credit balance: Raises HTTP 402 if exhausted
     """
 
     # 1. Trial expiry check
@@ -44,87 +42,21 @@ async def enforce_plan_limits(
                 },
             )
 
-    tenant_id = str(tenant.id)
-    today: date = datetime.now(timezone.utc).date()
-
-    # 2. Daily spend check
-    daily_result = await db.execute(
-        text(
-            """
-            SELECT COALESCE(SUM(cost_usd), 0)
-            FROM llm_usage
-            WHERE tenant_id = :tenant_id
-              AND created_at::date = :today
-            """
-        ),
-        {"tenant_id": tenant_id, "today": today},
-    )
-    daily_spent = float(daily_result.scalar() or 0)
-    daily_limit = plan_limits.billing.daily_spend_limit_usd
-
-    if not plan_limits.billing.overage_allowed and daily_spent >= (daily_limit - COST_BUFFER_USD):
+    # 2. Credit check
+    # Throttling is now done primarily via credits instead of daily/monthly budget caps.
+    sufficient = await has_sufficient_credits(db, tenant.id)
+    if not sufficient:
         raise HTTPException(
-            status_code=429,
+            status_code=402,
             detail={
-                "error": "Daily LLM spend limit reached",
-                "spent_today_usd": daily_spent,
-                "daily_limit_usd": daily_limit,
-            },
-        )
-
-    # 3. Monthly spend check
-    monthly_result = await db.execute(
-        text(
-            """
-            SELECT COALESCE(SUM(cost_usd), 0)
-            FROM llm_usage
-            WHERE tenant_id = :tenant_id
-              AND date_trunc('month', created_at) = date_trunc('month', CURRENT_DATE::timestamptz)
-            """
-        ),
-        {"tenant_id": tenant_id},
-    )
-    monthly_spent = float(monthly_result.scalar() or 0)
-    monthly_limit = plan_limits.billing.monthly_spend_limit_usd
-
-    if not plan_limits.billing.overage_allowed and monthly_spent >= monthly_limit:
-        raise HTTPException(
-            status_code=429,
-            detail={
-                "error": "Monthly LLM spend limit reached",
-                "spent_this_month_usd": monthly_spent,
-                "monthly_limit_usd": monthly_limit,
-            },
-        )
-
-    # 4. Daily request count check
-    requests_result = await db.execute(
-        text(
-            """
-            SELECT COUNT(*)
-            FROM llm_usage
-            WHERE tenant_id = :tenant_id
-              AND created_at::date = :today
-            """
-        ),
-        {"tenant_id": tenant_id, "today": today},
-    )
-    requests_today = int(requests_result.scalar() or 0)
-    max_requests = plan_limits.usage.max_requests_per_day
-
-    if requests_today >= max_requests:
-        raise HTTPException(
-            status_code=429,
-            detail={
-                "error": "Daily request limit reached",
-                "requests_today": requests_today,
-                "max_requests_per_day": max_requests,
+                "error": "credits_exhausted",
+                "message": "You have run out of credits. Please upgrade your plan to continue.",
             },
         )
 
 
 # ---------------------------------------------------------------------------
-# Legacy helper kept for backward compatibility (not used on new paths)
+# Legacy helper kept for backward compatibility (internal paths only)
 # ---------------------------------------------------------------------------
 
 async def enforce_cost_limit(
@@ -133,33 +65,15 @@ async def enforce_cost_limit(
 ) -> dict:
     """
     Deprecated: use enforce_plan_limits instead.
-    Kept to avoid breaking any direct callers that haven't been migrated yet.
+    Enforces credit check for dict-based tenant data.
     """
-    tenant_id = tenant["tenant_id"]
-    daily_limit = tenant["daily_cost_limit"]
-    today = datetime.now(timezone.utc).date()
-
-    result = await db.execute(
-        text(
-            """
-            SELECT COALESCE(SUM(cost_usd), 0)
-            FROM llm_usage
-            WHERE tenant_id = :tenant_id
-              AND created_at::date = :today
-            """
-        ),
-        {"tenant_id": tenant_id, "today": today},
-    )
-    spent_today = float(result.scalar() or 0)
-
-    if spent_today >= (daily_limit - COST_BUFFER_USD):
+    import uuid
+    tenant_id = uuid.UUID(tenant["tenant_id"]) if isinstance(tenant["tenant_id"], str) else tenant["tenant_id"]
+    
+    sufficient = await has_sufficient_credits(db, tenant_id)
+    if not sufficient:
         raise HTTPException(
-            status_code=429,
-            detail={
-                "error": "Daily LLM budget exceeded",
-                "spent_today": spent_today,
-                "daily_limit": daily_limit,
-            },
+            status_code=402,
+            detail={"error": "Credits exhausted"},
         )
-
-    return {"spent_today": spent_today, "daily_limit": daily_limit}
+    return {"status": "ok"}
