@@ -65,81 +65,27 @@ def test_trial_expired_returns_403(mock_dt, mock_get_limits, client: TestClient)
     # Cleanup
     app.dependency_overrides[require_tenant_api_key] = mock_auth_pro
 
-@patch("app.api.chat.get_plan_limits")
-def test_daily_spend_limit_enforced(mock_get_limits, client: TestClient):
-    # Mock plan limits
-    from app.core.plan_limits import PlanLimits
-    limits = PlanLimits.from_features({
-        "billing": {"daily_spend_limit_usd": 5.0}
-    })
-    mock_get_limits.return_value = limits
-    
-    # We need to control the mock session returned by get_db
-    mock_session = AsyncMock()
-    mock_result = MagicMock()
-    mock_result.scalar.return_value = 5.0 # limit hit
-    mock_session.execute.return_value = mock_result
-    
-    async def override_get_db():
-        yield mock_session
-        
-    app.dependency_overrides[get_db] = override_get_db
+@patch("app.usage.throttler.has_sufficient_credits")
+def test_credit_limit_enforced(mock_has_credits, client: TestClient):
+    # Mock credit check failure
+    mock_has_credits.return_value = False
     
     response = client.post(
         "/v1/chat/",
         json={"query": "Hello"}
     )
     
-    assert response.status_code == 429
-    assert "Daily LLM spend limit reached" in response.json()["detail"]["error"]
-    
-    # Cleanup
-    app.dependency_overrides.pop(get_db, None)
-
-@patch("app.api.chat.get_plan_limits")
-def test_daily_request_limit_enforced(mock_get_limits, client: TestClient):
-    # Mock plan limits
-    from app.core.plan_limits import PlanLimits
-    limits = PlanLimits.from_features({
-        "usage": {"max_requests_per_day": 10}
-    })
-    mock_get_limits.return_value = limits
-    
-    # Mock DB results:
-    # 1. Daily spend = 0
-    # 2. Monthly spend = 0
-    # 3. Request count = 10 (limit hit)
-    mock_session = AsyncMock()
-    
-    mock_result_0 = MagicMock()
-    mock_result_0.scalar.return_value = 0
-    
-    mock_result_limit = MagicMock()
-    mock_result_limit.scalar.return_value = 10
-    
-    mock_session.execute.side_effect = [mock_result_0, mock_result_0, mock_result_limit]
-    
-    async def override_get_db():
-        yield mock_session
-        
-    app.dependency_overrides[get_db] = override_get_db
-    
-    response = client.post(
-        "/v1/chat/",
-        json={"query": "Hello"}
-    )
-    
-    assert response.status_code == 429
-    assert "Daily request limit reached" in response.json()["detail"]["error"]
-    
-    # Cleanup
-    app.dependency_overrides.pop(get_db, None)
+    assert response.status_code == 402
+    assert "credits_exhausted" in response.json()["detail"]["error"]
 
 @patch("app.utils.redis_client.redis_client", new_callable=AsyncMock)
 @patch("app.services.chat_service.get_chat_completion", new_callable=AsyncMock)
 @patch("app.services.chat_service.get_embedding", new_callable=AsyncMock)
 @patch("app.api.chat.get_plan_limits")
-def test_plan_limits_applied_to_chat(mock_get_limits, mock_embedding, mock_completion, mock_redis, client: TestClient):
+@patch("app.usage.throttler.has_sufficient_credits")
+def test_plan_limits_applied_to_chat(mock_has_credits, mock_get_limits, mock_embedding, mock_completion, mock_redis, client: TestClient):
+    # Mock credits pass
+    mock_has_credits.return_value = True
     # Mock plan limits
     from app.core.plan_limits import PlanLimits
     limits = PlanLimits.from_features({

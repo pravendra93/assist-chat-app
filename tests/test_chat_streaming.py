@@ -28,10 +28,11 @@ def client():
         yield c
 
 @patch("app.utils.redis_client.redis_client", new_callable=AsyncMock)
-@patch("app.services.chat_service.get_chat_completion_stream", new_callable=AsyncMock)
-@patch("app.services.chat_service.get_embedding", new_callable=AsyncMock)
 @patch("app.api.chat.get_plan_limits")
-def test_chat_streaming(mock_get_limits, mock_embedding, mock_stream, mock_redis, client):
+@patch("app.api.chat.enforce_plan_limits", new_callable=AsyncMock)
+def test_chat_streaming(mock_enforce, mock_get_limits, mock_embedding, mock_stream, mock_redis, client):
+    # Bypass throttler gates
+    mock_enforce.return_value = None
     # Mock plan limits
     from app.core.plan_limits import PlanLimits
     limits = PlanLimits.from_features({
