@@ -8,6 +8,7 @@ from app.api.chat import router as chat_router
 from app.api.widget import router as widget_router
 from app.api.internal import router as internal_router
 from app.core.logging import setup_logging, logger
+from app.middleware.cors import DynamicCORSMiddleware
 from app.utils.redis_client import redis_client
 
 # Setup structured logging
@@ -30,15 +31,9 @@ app = FastAPI(
 )
 
 # CORS Configuration
-# Allow all origins since the chat widget is embedded on third-party client websites.
-# Security is handled via the ASST-API-Key header, not CORS.
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=False,
-    allow_methods=["POST", "GET", "OPTIONS"],
-    allow_headers=["ASST-API-KEY", "Content-Type", "Authorization"],
-)
+# Custom middleware to handle PORTAL_DOMAINS and ASST-API-KEY validation for CORS.
+# This allows the widget to work from any domain as long as the API key is present.
+app.add_middleware(DynamicCORSMiddleware)
 
 @app.middleware("http")
 async def log_requests(request: Request, call_next):
