@@ -1,10 +1,10 @@
 import os
 from typing import Optional, List, Union
 try:
-    from pydantic_settings import BaseSettings
-    from pydantic import validator
+    from pydantic_settings import BaseSettings, SettingsConfigDict
+    from pydantic import validator, Field
 except ImportError:
-    from pydantic import BaseSettings, validator
+    from pydantic import BaseSettings, validator, Field
 
 class Settings(BaseSettings):
     # Environment
@@ -35,11 +35,12 @@ class Settings(BaseSettings):
     SMTP_TLS: bool = True
     
     # AI / Embeddings
-    OPENAI_API_KEY: Optional[str] = os.getenv("OPEN_AI_KEY")
+    # Map OPEN_AI_KEY from .env to OPENAI_API_KEY
+    OPENAI_API_KEY: Optional[str] = Field(None, validation_alias="OPEN_AI_KEY")
 
     # Celery
-    CELERY_BROKER_URL: str = os.getenv("CELERY_BROKER_URL")
-    CELERY_RESULT_BACKEND: str = os.getenv("CELERY_RESULT_BACKEND")
+    CELERY_BROKER_URL: str = "redis://localhost:6379/0"
+    CELERY_RESULT_BACKEND: str = "redis://localhost:6379/1"
 
     # Digital Ocean Spaces / S3
     SPACES_ACCESS_KEY_ID: Optional[str] = os.getenv("SPACES_ACCESS_KEY_ID")
@@ -74,10 +75,11 @@ class Settings(BaseSettings):
         return []
 
     # Internal Security
-    INTERNAL_CACHE_HEADER: Optional[str] = os.getenv("INTERNAL_CACHE_HEADER")
+    INTERNAL_CACHE_HEADER: Optional[str] = None
 
-    class Config:
-        env_file = ".env"
-        extra = "ignore"
+    model_config = SettingsConfigDict(
+        env_file=".env",
+        extra="ignore"
+    )
 
 settings = Settings()
