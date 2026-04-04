@@ -8,7 +8,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 async def main():
-    api_key = os.getenv("OPEN_AI_KEY")
+    api_key = os.getenv("OPEN_API_KEY")
     client = AsyncOpenAI(api_key=api_key)
     try:
         response = await client.chat.completions.create(

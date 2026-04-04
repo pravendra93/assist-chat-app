@@ -36,7 +36,7 @@ class Settings(BaseSettings):
     
     # AI / Embeddings
     # Map OPEN_AI_KEY from .env to OPENAI_API_KEY
-    OPENAI_API_KEY: Optional[str] = Field(None, validation_alias="OPEN_AI_KEY")
+    OPENAI_API_KEY: Optional[str] = Field(None, validation_alias="OPEN_API_KEY")
 
     # Celery
     CELERY_BROKER_URL: str = "redis://localhost:6379/0"
