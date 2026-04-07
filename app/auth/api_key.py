@@ -20,7 +20,8 @@ async def require_tenant_api_key(
     if not asst_api_key:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Authentication failed"
+            detail="Authentication failed",
+            headers={"X-Auth-Error": "AUTH_01"}
         )
     
     # Extract key prefix for efficient lookup (first 12 chars, e.g., "sk_live_abc1")
@@ -47,7 +48,8 @@ async def require_tenant_api_key(
     if not api_key_record:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Authentication failed"
+            detail="Authentication failed",
+            headers={"X-Auth-Error": "AUTH_02"}
         )
         
     # Get the Tenant (with eager loading to avoid N+1)
@@ -59,7 +61,8 @@ async def require_tenant_api_key(
     if not tenant or not api_key_record.is_active:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Authentication failed"
+            detail="Authentication failed",
+            headers={"X-Auth-Error": "AUTH_03"}
         )
 
     # --- Domain Validation ---
@@ -133,7 +136,8 @@ async def require_tenant_api_key(
         if not normalized_configured_domains:
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Authentication failed"
+                detail="Authentication failed",
+                headers={"X-Auth-Error": "AUTH_04"}
             )
 
         # Check for match (case-insensitive)
@@ -146,7 +150,8 @@ async def require_tenant_api_key(
         if not is_domain_allowed:
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Authentication failed"
+                detail="Authentication failed",
+                headers={"X-Auth-Error": "AUTH_05"}
             )
     # --- End Domain Validation ---
 
