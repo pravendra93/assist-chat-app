@@ -14,25 +14,32 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      # 1. Checkout code
+      # 1. Checkout
       - name: Checkout
         uses: actions/checkout@v4
 
-      # 2. Login to GHCR (use built-in token)
+      # 2. Login to GHCR
       - name: Login to GHCR
         run: echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
 
-      # 3. Build image
-      - name: Build Docker Image
+      # 3. Build & Push (FIXED NAMING)
+      - name: Build & Push Docker Image
         run: |
-          docker build -t ghcr.io/${{ github.repository }}/chat-api:latest .
+          IMAGE=ghcr.io/${{ github.repository_owner }}/chat-api
 
-      # 4. Push image
-      - name: Push Docker Image
+          docker build -t $IMAGE:${{ github.sha }} .
+          docker tag $IMAGE:${{ github.sha }} $IMAGE:latest
+
+          docker push $IMAGE:${{ github.sha }}
+          docker push $IMAGE:latest
+
+      # 4. Sanity Gate (CRITICAL)
+      - name: Verify Image Exists
         run: |
-          docker push ghcr.io/${{ github.repository }}/chat-api:latest
+          IMAGE=ghcr.io/${{ github.repository_owner }}/chat-api
+          docker pull $IMAGE:latest
 
-      # 5. Deploy to DO via SSH
+      # 5. Deploy via SSH
       - name: Deploy to Droplet
         uses: appleboy/ssh-action@v1.0.3
         with:
@@ -40,15 +47,27 @@ jobs:
           username: ${{ secrets.SERVER_USER }}
           key: ${{ secrets.SSH_PRIVATE_KEY }}
           script: |
+            set -e
+
+            IMAGE=ghcr.io/${{ github.repository_owner }}/chat-api
+
+            # Login to GHCR
             echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
 
             cd assist-chat-app
 
-            # Pull latest images defined in docker-compose.yml
+            # 🔒 Sanity Gate on server
+            docker pull $IMAGE:latest
+
+            # Pull all images defined in compose
             docker compose pull
 
-            # Recreate containers with new image and force update
-            docker compose up -d --force-recreate
+            # Recreate containers safely
+            docker compose up -d
 
-            # Cleanup old images to save disk space
+            # 🧪 Basic health check (adjust endpoint if needed)
+            sleep 5
+            curl -f http://localhost:8001/health || exit 1
+
+            # Cleanup old images
             docker image prune -f
