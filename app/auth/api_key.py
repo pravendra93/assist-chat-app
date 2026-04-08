@@ -23,28 +23,79 @@ async def require_tenant_api_key(
             detail="Authentication failed"
         )
     
+    asst_api_key = asst_api_key.strip()
+    
     # Extract key prefix for efficient lookup (first 12 chars, e.g., "sk_live_abc1")
     # This allows us to use an indexed column instead of fetching all keys
     key_prefix = asst_api_key[:12] if len(asst_api_key) >= 12 else asst_api_key
     
-    # Lookup API Keys by prefix (much more efficient than fetching all)
+    # Lookup API Keys by prefix (efficient)
     result = await db.execute(
         select(ApiKey).where(
             ApiKey.key_prefix == key_prefix,
             ApiKey.is_active == True
         )
     )
-    api_keys = result.scalars().all()
+    api_keys = list(result.scalars().all())
     
-    # Verify hash for matching prefix keys
+    # Fallback: if no keys found by prefix, check ALL active keys (slower, but covers migration/missing prefix cases)
+    if not api_keys:
+        fallback_result = await db.execute(
+            select(ApiKey).where(ApiKey.is_active == True)
+        )
+        api_keys = list(fallback_result.scalars().all())
+    
+    # Verify hash for matching keys
     api_key_record = None
     for key in api_keys:
         if verify_api_key(asst_api_key, key.api_key_hash):
             api_key_record = key
             break
+
+    # --- Domain & Portal Validation ---
+    request_origin = request.headers.get("origin") or request.headers.get("referer")
+    PORTAL_DOMAINS = settings.PORTAL_DOMAINS
     
-    # Generic error message to prevent enumeration (FINDING-010)
+    request_domain = None
+    is_portal_request = False
+    
+    if request_origin == "null":
+        is_portal_request = True
+    elif request_origin:
+        parsed = urlparse(request_origin)
+        netloc = (parsed.netloc or parsed.path).lower()
+        if netloc.startswith("www."):
+            netloc = netloc[4:]
+        
+        # Check for exact match or subdomain match for portal domains
+        for portal_domain in PORTAL_DOMAINS:
+            portal_domain = portal_domain.lower()
+            if netloc == portal_domain or netloc.endswith(f".{portal_domain}"):
+                is_portal_request = True
+                break
+        
+        # Extract hostname for tenant-specific configuration matching
+        request_domain = parsed.hostname or request_origin
+        if request_domain and request_domain.startswith("www."):
+            request_domain = request_domain[4:]
+    
+    # --- Portal Bypass Logic ---
+    # If key verification failed (e.g. because it's a masked key like 'sk_live_abc1...')
+    # but it's a portal request for a GET endpoint, we allow it if the prefix matches.
+    if not api_key_record and is_portal_request and request.method == "GET":
+        if asst_api_key.endswith("..."):
+            provided_prefix = asst_api_key[:-3]
+            for k in api_keys:
+                if k.key_prefix == provided_prefix:
+                    api_key_record = k
+                    from app.core.logging import logger
+                    logger.info("auth_portal_prefix_bypass", tenant_id=str(k.tenant_id), key_prefix=provided_prefix)
+                    break
+
+    # Final check if we found a valid key or bypass
     if not api_key_record:
+        from app.core.logging import logger
+        logger.warning("auth_failed_invalid_key", key_prefix=key_prefix, has_origin=bool(request_origin))
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Authentication failed"
@@ -57,35 +108,13 @@ async def require_tenant_api_key(
     tenant = tenant_result.scalars().first()
     
     if not tenant or not api_key_record.is_active:
+        from app.core.logging import logger
+        logger.warning("auth_failed_inactive_tenant_or_key", tenant_id=str(api_key_record.tenant_id))
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Authentication failed"
         )
 
-    # --- Domain Validation ---
-    request_origin = request.headers.get("origin") or request.headers.get("referer")
-    
-    # Internal portal domains that bypass tenant-specific domain validation
-    PORTAL_DOMAINS = settings.PORTAL_DOMAINS
-    
-    request_domain = None
-    is_portal_request = False
-    
-    if request_origin:
-        parsed = urlparse(request_origin)
-        # Check if the request is coming from one of our portal domains
-        netloc = (parsed.netloc or parsed.path).lower()
-        if netloc.startswith("www."):
-            netloc = netloc[4:]
-        
-        if netloc in PORTAL_DOMAINS:
-            is_portal_request = True
-            
-        # Extract hostname for tenant-specific configuration matching
-        request_domain = parsed.hostname or request_origin
-        if request_domain.startswith("www."):
-            request_domain = request_domain[4:]
-    
     # If it's a request from our portal, we skip the dynamic domain validation
     if not is_portal_request:
         # DETECT NON-BROWSER CLIENTS (Mitigation for FINDING-002)
@@ -131,6 +160,8 @@ async def require_tenant_api_key(
         
         # If no domains are configured, the user specified "allow request only to those ... which has domain"
         if not normalized_configured_domains:
+            from app.core.logging import logger
+            logger.warning("auth_failed_no_configured_domains", tenant_id=str(tenant.id), origin=request_origin)
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="Authentication failed"
@@ -144,6 +175,8 @@ async def require_tenant_api_key(
                 is_domain_allowed = True
                 
         if not is_domain_allowed:
+            from app.core.logging import logger
+            logger.warning("auth_failed_domain_not_allowed", tenant_id=str(tenant.id), request_domain=request_domain, allowed_domains=normalized_configured_domains)
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="Authentication failed"

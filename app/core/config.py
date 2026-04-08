@@ -36,7 +36,7 @@ class Settings(BaseSettings):
     
     # AI / Embeddings
     # Map OPEN_AI_KEY from .env to OPENAI_API_KEY
-    OPENAI_API_KEY: Optional[str] = Field(None, validation_alias="OPEN_API_KEY")
+    OPENAI_API_KEY: Optional[str] = Field(None, validation_alias="OPEN_AI_KEY")
 
     # Celery
     CELERY_BROKER_URL: str = "redis://localhost:6379/0"
@@ -56,9 +56,10 @@ class Settings(BaseSettings):
     def assemble_cors_origins(cls, v: Union[str, List[str]]) -> List[str]:
         if isinstance(v, str) and not v.startswith("["):
             return [i.strip() for i in v.split(",")]
-        elif isinstance(v, (list, str)):
-            return v
-        raise ValueError(v)
+        elif isinstance(v, str) and v.startswith("["):
+            import json
+            return json.loads(v)
+        return v
 
     # Redis
     REDIS_URL: str = os.getenv("REDIS_URL", "redis://localhost:6379/0")
@@ -70,9 +71,10 @@ class Settings(BaseSettings):
     def assemble_portal_domains(cls, v: Union[str, List[str]]) -> List[str]:
         if isinstance(v, str) and not v.startswith("["):
             return [i.strip() for i in v.split(",")]
-        elif isinstance(v, (list, str)):
-            return v
-        return []
+        elif isinstance(v, str) and v.startswith("["):
+            import json
+            return json.loads(v)
+        return v
 
     # Internal Security
     INTERNAL_CACHE_HEADER: Optional[str] = None
