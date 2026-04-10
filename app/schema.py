@@ -338,6 +338,7 @@ class ChatbotConfigOut(BaseModel):
     is_active: bool = True
     primary_color: Optional[str] = "#47d751"
     background_color: Optional[str] = "#ffffff"
+    pattern_type: Optional[str] = "none"
     logo_url: Optional[str] = None
     position: Optional[str] = "bottom-right"
     created_at: Optional[datetime] = None
@@ -352,6 +353,7 @@ class ChatbotConfigUpdate(BaseModel):
     is_active: Optional[bool] = None
     primary_color: Optional[str] = None
     background_color: Optional[str] = None
+    pattern_type: Optional[str] = None
     logo_url: Optional[str] = None
     position: Optional[str] = None
 

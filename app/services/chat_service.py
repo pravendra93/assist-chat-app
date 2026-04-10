@@ -379,6 +379,16 @@ class ChatService:
         import hashlib
         import json
 
+        # Resolve plan-aware settings (or safe defaults)
+        if plan_limits is not None:
+            max_chunks = plan_limits.model_limits.max_chunks_per_query
+            max_tokens = plan_limits.model_limits.max_tokens_per_request
+            model = plan_limits.model_limits.default_model
+        else:
+            max_chunks = 5
+            max_tokens = 500
+            model = "gpt-4o-mini"
+
         if not session_id:
             session_id = str(uuid.uuid4())
 

@@ -16,15 +16,21 @@ class DynamicCORSMiddleware(BaseHTTPMiddleware):
         
         # Consider origin null (srcdoc) or portal domains as trusted
         is_trusted_origin = False
+        
+        TRUSTED_DOMAINS = list(settings.PORTAL_DOMAINS) + [
+            "localhost:3000", "localhost:3001", "localhost:8000", "localhost:8001",
+            "127.0.0.1:3000", "127.0.0.1:3001", "127.0.0.1:8000", "127.0.0.1:8001"
+        ]
+
         if origin == "null":
             is_trusted_origin = True
         elif origin:
-            for domain in settings.PORTAL_DOMAINS:
+            for domain in TRUSTED_DOMAINS:
                 if domain in origin:
                     is_trusted_origin = True
                     break
         elif referer:
-            for domain in settings.PORTAL_DOMAINS:
+            for domain in TRUSTED_DOMAINS:
                 if domain in referer:
                     is_trusted_origin = True
                     break

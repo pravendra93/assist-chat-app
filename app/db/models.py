@@ -99,6 +99,7 @@ class ChatbotConfig(Base):
     
     primary_color = sa.Column(sa.String, nullable=True, default='#47d751')
     background_color = sa.Column(sa.String, nullable=True, default='#ffffff')
+    pattern_type = sa.Column(sa.String, nullable=True, default='none') # none, waves, mesh, dots, grid
     logo_url = sa.Column(sa.String, nullable=True)
     
     position = sa.Column(sa.String, nullable=True, default='bottom-right')

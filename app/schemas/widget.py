@@ -10,17 +10,23 @@ class WidgetConfigResponse(BaseModel):
     bot_name: str = "Support AI"
     logo_url: Optional[str] = None
     background_color: Optional[str] = None
+    pattern_type: Optional[str] = "none"
     position: Optional[str] = "bottom-right"
     suggested_questions: List[str] = []
     # Add other config fields as needed
 
 class WidgetChatRequest(BaseModel):
-    message: str
+    message: Optional[str] = None
+    query: Optional[str] = None
     session_id: Optional[str] = None
     metadata: Dict[str, Any] = {}
 
+    @property
+    def text(self) -> str:
+        return self.message or self.query or ""
+
 class WidgetChatResponse(BaseModel):
-    response: str = Field(..., alias="answer") # Align with chat.py 'answer' but keep 'response' for widget if preferred
+    answer: str
     session_id: str
     metadata: Dict[str, Any] = {}
 

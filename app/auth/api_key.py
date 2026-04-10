@@ -20,7 +20,7 @@ async def require_tenant_api_key(
     if not asst_api_key:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Authentication failed"
+            detail="Authentication failed: Missing ASST-API-KEY header"
         )
     
     asst_api_key = asst_api_key.strip()
@@ -54,11 +54,18 @@ async def require_tenant_api_key(
 
     # --- Domain & Portal Validation ---
     request_origin = request.headers.get("origin") or request.headers.get("referer")
-    PORTAL_DOMAINS = settings.PORTAL_DOMAINS
-    
     request_domain = None
     is_portal_request = False
     
+    # Get trusted portal domains from settings
+    PORTAL_DOMAINS = settings.PORTAL_DOMAINS
+    # Standard local dev domains and ports
+    LOCAL_SYSTEM_DOMAINS = [
+        "localhost:3000", "localhost:3001", "localhost:8000", "localhost:8001",
+        "127.0.0.1:3000", "127.0.0.1:3001", "127.0.0.1:8000", "127.0.0.1:8001"
+    ]
+    ALL_TRUSTED_DOMAINS = list(set(PORTAL_DOMAINS + LOCAL_SYSTEM_DOMAINS))
+
     if request_origin == "null":
         is_portal_request = True
     elif request_origin:
@@ -68,7 +75,7 @@ async def require_tenant_api_key(
             netloc = netloc[4:]
         
         # Check for exact match or subdomain match for portal domains
-        for portal_domain in PORTAL_DOMAINS:
+        for portal_domain in ALL_TRUSTED_DOMAINS:
             portal_domain = portal_domain.lower()
             if netloc == portal_domain or netloc.endswith(f".{portal_domain}"):
                 is_portal_request = True
@@ -98,7 +105,7 @@ async def require_tenant_api_key(
         logger.warning("auth_failed_invalid_key", key_prefix=key_prefix, has_origin=bool(request_origin))
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Authentication failed"
+            detail=f"Auth failed: Key/Prefix '{key_prefix}' not found. Origin: {request_origin}. Portal: {is_portal_request}"
         )
         
     # Get the Tenant (with eager loading to avoid N+1)
@@ -112,7 +119,7 @@ async def require_tenant_api_key(
         logger.warning("auth_failed_inactive_tenant_or_key", tenant_id=str(api_key_record.tenant_id))
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Authentication failed"
+            detail=f"Auth failed: Inactive tenant or key for {api_key_record.tenant_id if api_key_record else 'N/A'}"
         )
 
     # If it's a request from our portal, we skip the dynamic domain validation
@@ -160,12 +167,19 @@ async def require_tenant_api_key(
         
         # If no domains are configured, the user specified "allow request only to those ... which has domain"
         if not normalized_configured_domains:
-            from app.core.logging import logger
-            logger.warning("auth_failed_no_configured_domains", tenant_id=str(tenant.id), origin=request_origin)
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Authentication failed"
-            )
+            # Mitigation for local development: if we are on localhost/127.0.0.1, we allow it 
+            # even if not explicitly whitelisted, to allow developers to test easily.
+            is_local = any(l in (request_origin or "") for l in ["localhost", "127.0.0.1"])
+            if is_local:
+                from app.core.logging import logger
+                logger.info("auth_local_dev_bypass_no_domains", tenant_id=str(tenant.id), origin=request_origin)
+            else:
+                from app.core.logging import logger
+                logger.warning("auth_failed_no_configured_domains", tenant_id=str(tenant.id), origin=request_origin)
+                raise HTTPException(
+                    status_code=status.HTTP_401_UNAUTHORIZED,
+                    detail=f"Auth failed: No whitelisted domains for {tenant.id}. Origin: {request_origin}. Portal: {is_portal_request}"
+                )
 
         # Check for match (case-insensitive)
         is_domain_allowed = False
@@ -175,11 +189,24 @@ async def require_tenant_api_key(
                 is_domain_allowed = True
                 
         if not is_domain_allowed:
+            # Mitigation for local development: if we are on localhost/127.0.0.1, we allow it 
+            # even if not explicitly whitelisted, to allow developers to test easily.
+            is_local = any(l in (request_domain or "") for l in ["localhost", "127.0.0.1"])
+            if is_local:
+                from app.core.logging import logger
+                logger.info("auth_local_dev_bypass", tenant_id=str(tenant.id), request_domain=request_domain)
+                is_domain_allowed = True
+
+        if not is_domain_allowed:
             from app.core.logging import logger
-            logger.warning("auth_failed_domain_not_allowed", tenant_id=str(tenant.id), request_domain=request_domain, allowed_domains=normalized_configured_domains)
+            logger.warning("auth_failed_domain_not_allowed", 
+                           tenant_id=str(tenant.id), 
+                           request_domain=request_domain, 
+                           allowed_domains=normalized_configured_domains,
+                           origin=request_origin)
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Authentication failed"
+                detail=f"Auth failed: Domain '{request_domain}' not whitelisted for {tenant.id}. Allowed: {normalized_configured_domains}. Origin: {request_origin}. Portal: {is_portal_request}"
             )
     # --- End Domain Validation ---
 
