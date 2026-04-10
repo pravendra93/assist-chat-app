@@ -1,14 +1,16 @@
 class PromptBuilder:
-    # Dangerous patterns for prompt injection detection
+    BOOKING_URL = "https://rakrilabs.zohobookings.in/#/421636000000040050"
+
+    # -------------------------------
+    # Query Sanitization (unchanged, slightly improved logging safety)
+    # -------------------------------
     def sanitize_query(self, query: str) -> str:
         """Remove potential prompt injection patterns using more robust regex-based matching"""
         import re
         
         # Normalize: lower case and remove extra spaces/control chars
         normalized = re.sub(r'[\s\x00-\x1f]+', ' ', query.lower())
-        
-        # Regex to catch variations of common injection triggers
-        # e.g., "i g n o r e  p r e v i o u s", "ignore-previous", etc.
+
         patterns = [
             r"ignore\s*(all\s*)?previous",
             r"new\s*instructions",
@@ -17,24 +19,62 @@ class PromptBuilder:
             r"forget\s*everything",
             r"disregard\s*(the\s*)?rules",
         ]
-        
+
         for pattern in patterns:
             if re.search(pattern, normalized):
                 from app.core.logging import logger
-                logger.warning(f"Malicious query attempt: {query}")
+                logger.warning(f"Malicious query attempt blocked")
                 raise ValueError("Potentially malicious query detected")
+
         return query
-    
-    def build(self, query: str, chunks: list) -> list[dict]:
-        """
-        Assemble LLM prompt with context from retrieved chunks using XML delimiters
-        to prevent context-based prompt injection.
-        """
-        # Sanitize query for direct prompt injection
+
+    # -------------------------------
+    # Booking Intent Detection (deterministic)
+    # -------------------------------
+    def is_booking_intent(self, query: str) -> bool:
+        import re
+
+        query = query.lower()
+
+        keywords = [
+            "book", "schedule", "appointment",
+            "call", "meeting", "talk",
+            "connect", "demo"
+        ]
+
+        if any(word in query for word in keywords):
+            return True
+
+        patterns = [
+            r"book.*call",
+            r"schedule.*(call|meeting)",
+            r"talk.*(team|someone)",
+            r"connect.*(team|founder)",
+        ]
+
+        return any(re.search(p, query) for p in patterns)
+
+    # -------------------------------
+    # Booking Response (NO LLM)
+    # -------------------------------
+    def build_booking_response(self) -> str:
+        return (
+            "You can book a call here:\n"
+            f"👉 <a href='{self.BOOKING_URL}' target='_blank' class='booking-link'>Book Your Call</a>\n"
+            "Just pick a time that works for you."
+        )
+
+    # -------------------------------
+    # Build RAG Prompt (LLM only for non-booking)
+    # -------------------------------
+    def build(self, query: str, chunks: list) -> list[dict] | str:
         sanitized_query = self.sanitize_query(query)
-        
-        # Extract content from chunks and wrap each in tags for clarity
-        # We join them with clear delimiters
+
+        # 🚨 HARD GATE: booking intent bypasses LLM
+        if self.is_booking_intent(sanitized_query):
+            return self.build_booking_response()
+
+        # Build context safely
         context_parts = []
         for i, chunk in enumerate(chunks):
             # We don't sanitize the context content (it's internal data), 
@@ -64,10 +104,26 @@ class PromptBuilder:
                 - Do not mention the word 'context' or 'documents' in your response.
                 """
 
-        # Return messages in OpenAI format
-        messages = [
-            {"role": "system", "content": system_prompt},
+        return [
+            {"role": "system", "content": system_prompt.strip()},
             {"role": "user", "content": sanitized_query}
         ]
-        
-        return messages
+
+    # -------------------------------
+    # Output Guardrail (post-processing)
+    # -------------------------------
+    def enforce_output_rules(self, response: str) -> str:
+        booking_url = self.BOOKING_URL
+
+        # Replace raw booking URL with HTML
+        if booking_url in response and "<a" not in response:
+            response = response.replace(
+                booking_url,
+                f"<a href='{booking_url}' target='_blank' class='booking-link'>Book Your Call</a>"
+            )
+
+        # Ensure emoji presence
+        if "booking-link" in response and "👉" not in response:
+            response = response.replace("<a", "👉 <a")
+
+        return response
