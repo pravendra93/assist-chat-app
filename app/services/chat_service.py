@@ -207,6 +207,23 @@ class ChatService:
             # 3. Build prompt
             messages = self.prompt_builder.build(query, chunks)
 
+            # 🚨 HARD GATE: Check if prompt builder returned a direct answer (bypass LLM)
+            if isinstance(messages, str):
+                answer = self.prompt_builder.enforce_output_rules(messages)
+                persistence_data = {
+                    "query": query,
+                    "answer": answer,
+                    "model": "hard-gate",
+                    "prompt_tokens": 0,
+                    "completion_tokens": 0,
+                    "total_tokens": 0,
+                    "cost_usd": 0.0,
+                    "cached": False,
+                }
+                # Cache the bypassed result
+                await redis_client.set_cache(cache_key, {"answer": answer}, ttl=86400)
+                return answer, session_id, persistence_data
+
             # 4. Call LLM (plan-limited model & max_tokens)
             try:
                 @retry(
@@ -222,7 +239,10 @@ class ChatService:
                     )
 
                 llm_completion = await fetch_completion_with_retry()
-                answer = llm_completion.choices[0].message.content
+                raw_answer = llm_completion.choices[0].message.content
+                
+                # Apply output guardrails (links, emojis, etc.)
+                answer = self.prompt_builder.enforce_output_rules(raw_answer)
 
                 # 5. Calculate cost
                 prompt_tokens = llm_completion.usage.prompt_tokens
@@ -459,6 +479,30 @@ class ChatService:
 
         # 2. Build prompt
         messages = self.prompt_builder.build(query, chunks)
+
+        # 🚨 HARD GATE: Check if prompt builder returned a direct answer (bypass streaming LLM)
+        if isinstance(messages, str):
+            answer = self.prompt_builder.enforce_output_rules(messages)
+            yield answer
+            
+            # Post-stream persistence for bypassed results
+            persistence_data = {
+                "query": query,
+                "answer": answer,
+                "model": "hard-gate",
+                "prompt_tokens": 0,
+                "completion_tokens": 0,
+                "total_tokens": 0,
+                "cost_usd": 0.0,
+                "cached": False,
+            }
+            from app.tasks.background import persist_chat_response
+            persist_chat_response.delay(
+                tenant_id_str=str(tenant.id),
+                session_id=session_id,
+                data=persistence_data,
+            )
+            return
 
         # 3. Call Streaming LLM
         try:
