@@ -20,7 +20,7 @@ jobs:
 
       # 2. Login to GHCR
       - name: Login to GHCR
-        run: echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
+        run: echo "${{ secrets.GHCR_PAT }}" | docker login ghcr.io -u ${{ secrets.GHCR_USERNAME }} --password-stdin
 
       # 3. Build & Push (FIXED NAMING)
       - name: Build & Push Docker Image
@@ -52,7 +52,7 @@ jobs:
             IMAGE=ghcr.io/${{ github.repository_owner }}/chat-api
 
             # Login to GHCR
-            echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
+            echo "${{ secrets.GHCR_PAT }}" | docker login ghcr.io -u ${{ secrets.GHCR_USERNAME }} --password-stdin
 
             cd assist-chat-app
 
