@@ -9,7 +9,7 @@ SELECT
   chunk_index,
   1 - (embedding <=> :query_embedding) AS score
 FROM knowledge_base_chunks
-WHERE tenant_id = :tenant_id
+WHERE tenant_id = :tenant_id AND status = 'active'
 ORDER BY embedding <=> :query_embedding
 LIMIT :top_k;
 """

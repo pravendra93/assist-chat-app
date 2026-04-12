@@ -163,6 +163,7 @@ class ChatService:
                     .where(
                         KnowledgeBaseEmbedding.tenant_id == tenant.id,
                         KnowledgeBaseEmbedding.model == "text-embedding-3-small",
+                        KnowledgeBaseChunk.status == "active",
                     )
                     .order_by(
                         KnowledgeBaseEmbedding.embedding.cosine_distance(embedding)
@@ -453,6 +454,7 @@ class ChatService:
                 .where(
                     KnowledgeBaseEmbedding.tenant_id == tenant.id,
                     KnowledgeBaseEmbedding.model == "text-embedding-3-small",
+                    KnowledgeBaseChunk.status == "active",
                 )
                 .order_by(
                     KnowledgeBaseEmbedding.embedding.cosine_distance(embedding)
