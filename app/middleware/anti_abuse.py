@@ -25,14 +25,19 @@ async def validate_domain_whitelist(request: Request, whitelisted_domains: Optio
         )
 
     # Basic domain check logic
+    from urllib.parse import urlparse
+    target_host = urlparse(target).netloc or urlparse(target).path
+    target_host = target_host.split(":")[0].lower()
+
     is_whitelisted = False
     for domain in whitelisted_domains:
-        if domain in target:
+        domain = domain.strip().lower()
+        if target_host == domain or target_host.endswith("." + domain):
             is_whitelisted = True
             break
             
     if not is_whitelisted:
-        logger.warning(f"Domain validation failed for: {target}")
+        logger.warning(f"Domain validation failed for target '{target}' (resolved host: '{target_host}')")
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Forbidden: Domain not whitelisted"

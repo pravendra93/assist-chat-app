@@ -17,6 +17,12 @@ setup_logging()
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Startup logic
+    from app.core.config import settings
+    if not settings.OPENAI_API_KEY:
+        raise RuntimeError("OPEN_API_KEY (aliased to OPENAI_API_KEY) environment variable is required")
+    if not settings.INTERNAL_CACHE_HEADER:
+        raise RuntimeError("INTERNAL_CACHE_HEADER environment variable is required")
+
     await redis_client.connect()
     logger.info("Application startup: Redis connected")
     yield
