@@ -1,0 +1,35 @@
+version: "3.9"
+
+services:
+  assist-chat-api:
+    build: .
+    container_name: assist-chat-api
+    expose:
+      - "8001"
+    env_file:
+      - .env
+    environment:
+      - REDIS_URL=redis://shared-redis:6379/2
+      - CELERY_BROKER_URL=redis://shared-redis:6379/2
+      - CELERY_RESULT_BACKEND=redis://shared-redis:6379/3
+    restart: unless-stopped
+    networks:
+      - shared_network
+
+  assist-chat-worker:
+    build: .
+    container_name: assist-chat-worker
+    command: celery -A app.worker worker --loglevel=info --concurrency=1
+    env_file:
+      - .env
+    environment:
+      - REDIS_URL=redis://shared-redis:6379/2
+      - CELERY_BROKER_URL=redis://shared-redis:6379/2
+      - CELERY_RESULT_BACKEND=redis://shared-redis:6379/3
+    restart: unless-stopped
+    networks:
+      - shared_network
+
+networks:
+  shared_network:
+    external: true
