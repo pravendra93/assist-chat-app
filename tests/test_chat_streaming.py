@@ -20,19 +20,23 @@ def create_mock_api_key():
 async def mock_auth():
     return create_mock_tenant(), create_mock_api_key()
 
-app.dependency_overrides[require_tenant_api_key] = mock_auth
-
 @pytest.fixture
 def client():
+    app.dependency_overrides[require_tenant_api_key] = mock_auth
     with TestClient(app) as c:
         yield c
+    app.dependency_overrides.pop(require_tenant_api_key, None)
 
 @patch("app.utils.redis_client.redis_client", new_callable=AsyncMock)
+@patch("app.services.chat_service.get_chat_completion_stream", new_callable=AsyncMock)
+@patch("app.services.chat_service.get_embedding", new_callable=AsyncMock)
 @patch("app.api.chat.get_plan_limits")
 @patch("app.api.chat.enforce_plan_limits", new_callable=AsyncMock)
 def test_chat_streaming(mock_enforce, mock_get_limits, mock_embedding, mock_stream, mock_redis, client):
     # Bypass throttler gates
     mock_enforce.return_value = None
+    mock_redis.is_circuit_broken.return_value = False
+    mock_redis.get_cache.return_value = None
     # Mock plan limits
     from app.core.plan_limits import PlanLimits
     limits = PlanLimits.from_features({
@@ -47,7 +51,9 @@ def test_chat_streaming(mock_enforce, mock_get_limits, mock_embedding, mock_stre
     # Mock DB
     mock_session = AsyncMock()
     mock_result = MagicMock()
-    mock_result.scalars.return_value.all.return_value = [] # No chunks for simplicity
+    mock_chunk = MagicMock()
+    mock_chunk.content = "Some context"
+    mock_result.scalars.return_value.all.return_value = [mock_chunk]
     mock_session.execute.return_value = mock_result
     
     async def override_get_db():

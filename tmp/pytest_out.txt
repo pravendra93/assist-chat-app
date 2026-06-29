@@ -1,0 +1,257 @@
+============================= test session starts ==============================
+platform linux -- Python 3.11.15, pytest-8.0.0, pluggy-1.6.0
+rootdir: /code
+plugins: pythonpath-0.7.3, anyio-4.14.0, mock-3.15.1
+collected 5 items
+
+tests/test_domain_validation.py ....F                                    [100%]
+
+=================================== FAILURES ===================================
+__________________ test_require_tenant_api_key_portal_bypass ___________________
+
+self = <AsyncMock name='mock.execute' id='281472464176528'>
+args = (<sqlalchemy.sql.selectable.Select object at 0xffff69989c50>,)
+kwargs = {}
+_call = call(<sqlalchemy.sql.selectable.Select object at 0xffff69989c50>)
+effect = <list_iterator object at 0xffff6ad81360>
+
+    async def _execute_mock_call(self, /, *args, **kwargs):
+        # This is nearly just like super(), except for special handling
+        # of coroutines
+    
+        _call = _Call((args, kwargs), two=True)
+        self.await_count += 1
+        self.await_args = _call
+        self.await_args_list.append(_call)
+    
+        effect = self.side_effect
+        if effect is not None:
+            if _is_exception(effect):
+                raise effect
+            elif not _callable(effect):
+                try:
+>                   result = next(effect)
+E                   StopIteration
+
+/usr/local/lib/python3.11/unittest/mock.py:2243: StopIteration
+
+During handling of the above exception, another exception occurred:
+
+mocker = <pytest_mock.plugin.MockerFixture object at 0xffff69916e10>
+
+    def test_require_tenant_api_key_portal_bypass(mocker):
+        tenant_id = uuid.uuid4()
+        tenant = create_mock_tenant(tenant_id)
+        api_key = create_mock_api_key(tenant_id)
+    
+        mocker.patch("app.auth.api_key.verify_api_key", return_value=True)
+        mocker.patch("app.auth.api_key.func.now", return_value=None)
+    
+        # Test cases for different portal domains
+        portal_origins = [
+            "http://localhost:3000",
+            "https://stage.assistra.app/",
+            "https://assistra.app",
+            "https://www.assistra.app"
+        ]
+    
+        for origin in portal_origins:
+            # Mock DB - only 2 calls expected (API Key and Tenant)
+            # The 3rd call (TenantConfig) should be bypassed
+            mock_db = AsyncMock()
+            mock_result_api = MagicMock()
+            mock_result_api.scalars.return_value.all.return_value = [api_key]
+            mock_result_tenant = MagicMock()
+            mock_result_tenant.scalars.return_value.first.return_value = tenant
+    
+            mock_db.execute.side_effect = [mock_result_api, mock_result_tenant]
+    
+            # Mock Request
+            mock_request = MagicMock(spec=Request)
+            mock_request.headers = {"origin": origin}
+    
+            async def run():
+                return await require_tenant_api_key(
+                    request=mock_request,
+                    asst_api_key="sk_live_123456789012",
+                    db=mock_db
+                )
+    
+>           result_tenant, result_api_key = anyio.run(run)
+
+tests/test_domain_validation.py:212: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+/usr/local/lib/python3.11/site-packages/anyio/_core/_eventloop.py:83: in run
+    return async_backend.run(func, args, {}, backend_options)
+/usr/local/lib/python3.11/site-packages/anyio/_backends/_asyncio.py:2432: in run
+    return runner.run(wrapper())
+/usr/local/lib/python3.11/asyncio/runners.py:118: in run
+    return self._loop.run_until_complete(task)
+/usr/local/lib/python3.11/asyncio/base_events.py:654: in run_until_complete
+    return future.result()
+/usr/local/lib/python3.11/site-packages/anyio/_backends/_asyncio.py:2415: in wrapper
+    return await func(*args)
+tests/test_domain_validation.py:206: in run
+    return await require_tenant_api_key(
+app/auth/api_key.py:117: in require_tenant_api_key
+    config_result = await db.execute(
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <AsyncMock name='mock.execute' id='281472464176528'>
+args = (<sqlalchemy.sql.selectable.Select object at 0xffff69989c50>,)
+kwargs = {}
+_call = call(<sqlalchemy.sql.selectable.Select object at 0xffff69989c50>)
+effect = <list_iterator object at 0xffff6ad81360>
+
+    async def _execute_mock_call(self, /, *args, **kwargs):
+        # This is nearly just like super(), except for special handling
+        # of coroutines
+    
+        _call = _Call((args, kwargs), two=True)
+        self.await_count += 1
+        self.await_args = _call
+        self.await_args_list.append(_call)
+    
+        effect = self.side_effect
+        if effect is not None:
+            if _is_exception(effect):
+                raise effect
+            elif not _callable(effect):
+                try:
+                    result = next(effect)
+                except StopIteration:
+                    # It is impossible to propagate a StopIteration
+                    # through coroutines because of PEP 479
+>                   raise StopAsyncIteration
+E                   StopAsyncIteration
+
+/usr/local/lib/python3.11/unittest/mock.py:2247: StopAsyncIteration
+----------------------------- Captured stdout call -----------------------------
+2026-06-24 17:55:35.761 | DEBUG    | SYSTEM - Using selector: EpollSelector
+2026-06-24 17:55:35.764 | DEBUG    | SYSTEM - Using selector: EpollSelector
+2026-06-24 17:55:35.765 | WARNING  | SYSTEM - potential_origin_spoofing {'tenant_id': 'a6801c7a-650a-47fd-a626-7ea790e454be', 'user_agent': '', 'origin': 'https://stage.assistra.app/'}
+------------------------------ Captured log call -------------------------------
+DEBUG    asyncio:selector_events.py:54 Using selector: EpollSelector
+DEBUG    asyncio:selector_events.py:54 Using selector: EpollSelector
+=============================== warnings summary ===============================
+app/db/models.py:9
+  /code/app/db/models.py:9: MovedIn20Warning: The ``declarative_base()`` function is now available as sqlalchemy.orm.declarative_base(). (deprecated since: 2.0) (Background on SQLAlchemy 2.0 at: https://sqlalche.me/e/b8d9)
+    Base = declarative_base()
+
+../usr/local/lib/python3.11/site-packages/passlib/utils/__init__.py:854
+  /usr/local/lib/python3.11/site-packages/passlib/utils/__init__.py:854: DeprecationWarning: 'crypt' is deprecated and slated for removal in Python 3.13
+    from crypt import crypt as _crypt
+
+app/schema.py:26
+  /code/app/schema.py:26: PydanticDeprecatedSince20: Support for class-based `config` is deprecated, use ConfigDict instead. Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.13/migration/
+    class AccountOut(BaseModel):
+
+../usr/local/lib/python3.11/site-packages/pydantic/_internal/_config.py:386
+  /usr/local/lib/python3.11/site-packages/pydantic/_internal/_config.py:386: UserWarning: Valid config keys have changed in V2:
+  * 'orm_mode' has been renamed to 'from_attributes'
+    warnings.warn(message, UserWarning)
+
+app/schema.py:71
+  /code/app/schema.py:71: PydanticDeprecatedSince20: Support for class-based `config` is deprecated, use ConfigDict instead. Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.13/migration/
+    class ConversationOut(BaseModel):
+
+app/schema.py:85
+  /code/app/schema.py:85: PydanticDeprecatedSince20: Support for class-based `config` is deprecated, use ConfigDict instead. Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.13/migration/
+    class MessageOut(BaseModel):
+
+app/schema.py:126
+  /code/app/schema.py:126: PydanticDeprecatedSince20: Support for class-based `config` is deprecated, use ConfigDict instead. Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.13/migration/
+    class CouponOut(BaseModel):
+
+app/schema.py:143
+  /code/app/schema.py:143: PydanticDeprecatedSince20: Support for class-based `config` is deprecated, use ConfigDict instead. Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.13/migration/
+    class CouponUsageOut(BaseModel):
+
+app/schema.py:167
+  /code/app/schema.py:167: PydanticDeprecatedSince20: Support for class-based `config` is deprecated, use ConfigDict instead. Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.13/migration/
+    class TenantOut(BaseModel):
+
+app/schema.py:188
+  /code/app/schema.py:188: PydanticDeprecatedSince20: Support for class-based `config` is deprecated, use ConfigDict instead. Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.13/migration/
+    class TenantUpdate(BaseModel):
+
+app/schema.py:205
+  /code/app/schema.py:205: PydanticDeprecatedSince20: Support for class-based `config` is deprecated, use ConfigDict instead. Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.13/migration/
+    class TenantUserOut(BaseModel):
+
+app/schema.py:219
+  /code/app/schema.py:219: PydanticDeprecatedSince20: Support for class-based `config` is deprecated, use ConfigDict instead. Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.13/migration/
+    class TenantConfigOut(BaseModel):
+
+app/schema.py:233
+  /code/app/schema.py:233: PydanticDeprecatedSince20: Support for class-based `config` is deprecated, use ConfigDict instead. Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.13/migration/
+    class PlanPriceOut(BaseModel):
+
+app/schema.py:263
+  /code/app/schema.py:263: PydanticDeprecatedSince20: Support for class-based `config` is deprecated, use ConfigDict instead. Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.13/migration/
+    class PlanOut(BaseModel):
+
+app/schema.py:287
+  /code/app/schema.py:287: PydanticDeprecatedSince20: Support for class-based `config` is deprecated, use ConfigDict instead. Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.13/migration/
+    class PlanUpdate(BaseModel):
+
+app/schema.py:307
+  /code/app/schema.py:307: PydanticDeprecatedSince20: Support for class-based `config` is deprecated, use ConfigDict instead. Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.13/migration/
+    class PublicPlanOut(BaseModel):
+
+app/schema.py:333
+  /code/app/schema.py:333: PydanticDeprecatedSince20: Support for class-based `config` is deprecated, use ConfigDict instead. Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.13/migration/
+    class ChatbotConfigOut(BaseModel):
+
+app/schema.py:359
+  /code/app/schema.py:359: PydanticDeprecatedSince20: Support for class-based `config` is deprecated, use ConfigDict instead. Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.13/migration/
+    class KnowledgeBaseFileOut(BaseModel):
+
+app/schema.py:392
+  /code/app/schema.py:392: PydanticDeprecatedSince20: Support for class-based `config` is deprecated, use ConfigDict instead. Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.13/migration/
+    class KnowledgeBaseChunkOut(BaseModel):
+
+app/schema.py:415
+  /code/app/schema.py:415: PydanticDeprecatedSince20: Support for class-based `config` is deprecated, use ConfigDict instead. Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.13/migration/
+    class ApiKeyOut(BaseModel):
+
+app/schema.py:469
+  /code/app/schema.py:469: PydanticDeprecatedSince20: Support for class-based `config` is deprecated, use ConfigDict instead. Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.13/migration/
+    class TenantLimitsOverrideOut(TenantLimitsOverrideBase):
+
+app/schema.py:481
+  /code/app/schema.py:481: PydanticDeprecatedSince20: Support for class-based `config` is deprecated, use ConfigDict instead. Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.13/migration/
+    class TenantSettingsOut(BaseModel):
+
+app/schema.py:497
+  /code/app/schema.py:497: PydanticDeprecatedSince20: Support for class-based `config` is deprecated, use ConfigDict instead. Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.13/migration/
+    class TenantSubscriptionOut(BaseModel):
+
+app/core/config.py:55
+  /code/app/core/config.py:55: PydanticDeprecatedSince20: Pydantic V1 style `@validator` validators are deprecated. You should migrate to Pydantic V2 style `@field_validator` validators, see the migration guide for more details. Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.13/migration/
+    @validator("BACKEND_CORS_ORIGINS", pre=True)
+
+app/core/config.py:69
+  /code/app/core/config.py:69: PydanticDeprecatedSince20: Pydantic V1 style `@validator` validators are deprecated. You should migrate to Pydantic V2 style `@field_validator` validators, see the migration guide for more details. Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.13/migration/
+    @validator("PORTAL_DOMAINS", pre=True)
+
+app/api/chat.py:29
+  /code/app/api/chat.py:29: PydanticDeprecatedSince20: Pydantic V1 style `@validator` validators are deprecated. You should migrate to Pydantic V2 style `@field_validator` validators, see the migration guide for more details. Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.13/migration/
+    @validator('query')
+
+../usr/local/lib/python3.11/site-packages/_pytest/cacheprovider.py:445
+  /usr/local/lib/python3.11/site-packages/_pytest/cacheprovider.py:445: PytestCacheWarning: could not create cache path /code/.pytest_cache/v/cache/nodeids: [Errno 13] Permission denied: '/code/.pytest_cache'
+    config.cache.set("cache/nodeids", sorted(self.cached_nodeids))
+
+../usr/local/lib/python3.11/site-packages/_pytest/cacheprovider.py:397
+  /usr/local/lib/python3.11/site-packages/_pytest/cacheprovider.py:397: PytestCacheWarning: could not create cache path /code/.pytest_cache/v/cache/lastfailed: [Errno 13] Permission denied: '/code/.pytest_cache'
+    config.cache.set("cache/lastfailed", self.lastfailed)
+
+../usr/local/lib/python3.11/site-packages/_pytest/stepwise.py:56
+  /usr/local/lib/python3.11/site-packages/_pytest/stepwise.py:56: PytestCacheWarning: could not create cache path /code/.pytest_cache/v/cache/stepwise: [Errno 13] Permission denied: '/code/.pytest_cache'
+    session.config.cache.set(STEPWISE_CACHE_DIR, [])
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ============================
+FAILED tests/test_domain_validation.py::test_require_tenant_api_key_portal_bypass
+=================== 1 failed, 4 passed, 29 warnings in 0.28s ===================

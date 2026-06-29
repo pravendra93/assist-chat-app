@@ -178,6 +178,7 @@ def test_require_tenant_api_key_portal_bypass(mocker):
     
     mocker.patch("app.auth.api_key.verify_api_key", return_value=True)
     mocker.patch("app.auth.api_key.func.now", return_value=None)
+    mocker.patch("app.auth.api_key.settings.PORTAL_DOMAINS", ["localhost:3000", "stage.assistra.app", "assistra.app"])
     
     # Test cases for different portal domains
     portal_origins = [
