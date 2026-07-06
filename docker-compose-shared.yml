@@ -2,7 +2,7 @@ version: "3.9"
 
 services:
   assist-chat-api:
-    build: .
+    image: ghcr.io/pravendra93/assist-chat-app:latest
     container_name: assist-chat-api
     expose:
       - "8001"
@@ -17,7 +17,7 @@ services:
       - shared_network
 
   assist-chat-worker:
-    build: .
+    image: ghcr.io/pravendra93/assist-chat-app:latest
     container_name: assist-chat-worker
     command: celery -A app.worker worker --loglevel=info --concurrency=1
     env_file:

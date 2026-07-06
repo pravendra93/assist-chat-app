@@ -1,9 +1,7 @@
 name: CI/CD Deploy
 
 on:
-  push:
-    branches:
-      - main
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -14,7 +12,7 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      # 1. Checkout
+      # 1. Checkout code
       - name: Checkout
         uses: actions/checkout@v4
 
@@ -22,24 +20,37 @@ jobs:
       - name: Login to GHCR
         run: echo "${{ secrets.GHCR_PAT }}" | docker login ghcr.io -u ${{ secrets.GHCR_USERNAME }} --password-stdin
 
-      # 3. Build & Push (FIXED NAMING)
-      - name: Build & Push Docker Image
+      # 2b. Generate lowercased image name
+      - name: Generate Image Name
         run: |
-          IMAGE=ghcr.io/${{ github.repository_owner }}/chat-api
+          echo "IMAGE_NAME=$(echo "ghcr.io/${{ github.repository }}" | tr '[:upper:]' '[:lower:]')" >> $GITHUB_ENV
 
-          docker build -t $IMAGE:${{ github.sha }} .
-          docker tag $IMAGE:${{ github.sha }} $IMAGE:latest
+      # 3. Build & Push
+      - name: Build Docker Image
+        run: |
+          docker build -t ${{ env.IMAGE_NAME }}:${{ github.sha }} .
+          docker tag ${{ env.IMAGE_NAME }}:${{ github.sha }} ${{ env.IMAGE_NAME }}:latest
 
-          docker push $IMAGE:${{ github.sha }}
-          docker push $IMAGE:latest
+          docker push ${{ env.IMAGE_NAME }}:${{ github.sha }}
+          docker push ${{ env.IMAGE_NAME }}:latest
 
       # 4. Sanity Gate (CRITICAL)
       - name: Verify Image Exists
         run: |
-          IMAGE=ghcr.io/${{ github.repository_owner }}/chat-api
-          docker pull $IMAGE:latest
+          docker pull ${{ env.IMAGE_NAME }}:latest
 
-      # 5. Deploy via SSH
+      # 5. Copy docker-compose-shared.yml via SCP
+      - name: Copy Compose File
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.SERVER_HOST }}
+          username: ${{ secrets.SERVER_USER }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          source: "docker-compose-shared.yml"
+          target: "assist-chat-app"
+          strip_components: 0
+
+      # 6. Deploy to DO via SSH
       - name: Deploy to Droplet
         uses: appleboy/ssh-action@v1.0.3
         with:
@@ -49,25 +60,16 @@ jobs:
           script: |
             set -e
 
-            IMAGE=ghcr.io/${{ github.repository_owner }}/chat-api
-
             # Login to GHCR
             echo "${{ secrets.GHCR_PAT }}" | docker login ghcr.io -u ${{ secrets.GHCR_USERNAME }} --password-stdin
 
             cd assist-chat-app
 
-            # 🔒 Sanity Gate on server
-            docker pull $IMAGE:latest
+            # Pull latest images defined in docker-compose-shared.yml
+            docker compose -f docker-compose-shared.yml pull
 
-            # Pull all images defined in compose
-            docker compose pull
+            # Recreate containers with new image and force update
+            docker compose -f docker-compose-shared.yml up -d --force-recreate
 
-            # Recreate containers safely
-            docker compose up -d
-
-            # 🧪 Basic health check (adjust endpoint if needed)
-            sleep 5
-            # curl -f http://localhost:8001/health || exit 1
-
-            # Cleanup old images
+            # Cleanup old images to save disk space
             docker image prune -f
