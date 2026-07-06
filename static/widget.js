@@ -5,6 +5,7 @@
     const script = document.currentScript;
     const apiKey = script.getAttribute('data-api-key');
     const apiUrl = script.getAttribute('data-api-url') || "http://localhost:8001";
+    const openByDefault = script.getAttribute('data-open') === 'true';
 
     const apiBase = `${apiUrl.replace(/\/$/, '')}/v1/widget`;
     const staticBase = `${apiUrl.replace(/\/$/, '')}/static`;
@@ -57,19 +58,29 @@
         const wrapper = document.createElement('div');
         wrapper.id = 'widget-wrapper';
         wrapper.className = `pos-${activeConfig.position || 'bottom-right'}`;
+        if (openByDefault) {
+            wrapper.classList.add('embedded');
+        }
         shadow.appendChild(wrapper);
 
         // Bubble Button
-        const bubble = document.createElement('div');
-        bubble.id = 'chat-bubble';
-        bubble.innerHTML = '<span>💬</span>';
-        bubble.style.backgroundColor = activeConfig.primary_color;
-        wrapper.appendChild(bubble);
+        let bubble = null;
+        if (!openByDefault) {
+            bubble = document.createElement('div');
+            bubble.id = 'chat-bubble';
+            bubble.innerHTML = '<span>💬</span>';
+            bubble.style.backgroundColor = activeConfig.primary_color;
+            wrapper.appendChild(bubble);
+        }
 
         // Chat Window
         const chatWindow = document.createElement('div');
         chatWindow.id = 'chat-window';
-        chatWindow.className = 'hidden';
+        if (openByDefault) {
+            chatWindow.className = 'open';
+        } else {
+            chatWindow.className = 'hidden';
+        }
         if (!isError && activeConfig.background_color) {
             chatWindow.style.backgroundColor = activeConfig.background_color;
         }
@@ -116,8 +127,13 @@
             }
         };
 
-        bubble.onclick = toggleChat;
-        shadow.getElementById('close-chat').onclick = toggleChat;
+        if (bubble) {
+            bubble.onclick = toggleChat;
+        }
+        const closeBtn = shadow.getElementById('close-chat');
+        if (closeBtn) {
+            closeBtn.onclick = toggleChat;
+        }
 
         const input = shadow.getElementById('chat-input');
         const sendBtn = shadow.getElementById('send-chat');
@@ -181,7 +197,12 @@
         function addMessage(text, type) {
             const msgDiv = document.createElement('div');
             msgDiv.className = `message ${type}`;
-            msgDiv.textContent = text;
+            if (type === 'bot') {
+                // Replace newlines with <br> for spacing, keeping HTML structure intact
+                msgDiv.innerHTML = text.replace(/\n/g, '<br>');
+            } else {
+                msgDiv.textContent = text;
+            }
             shadow.getElementById('chat-messages').appendChild(msgDiv);
             msgDiv.scrollIntoView();
         }
